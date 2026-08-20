@@ -1,0 +1,20 @@
+# Optional overlay: mount TrueNAS NFS as /backups inside the container.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.nfs.yml up -d
+#
+# Requires the nfs volume plugin (built into Docker) and that Danncloud
+# can reach Tleilax (10.20.30.3) over Zerotier. If NFS mount from inside
+# Docker is blocked, host-mount instead (see README) and skip this file.
+
+services:
+  dcengineer:
+    volumes:
+      - dce_backups:/backups
+
+volumes:
+  dce_backups:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr=${BACKUP_NFS_HOST:-10.20.30.3},${NFS_MOUNT_OPTIONS:-rw,nfsvers=4,hard,timeo=600,retrans=2}"
+      device: ":${BACKUP_NFS_EXPORT:-/mnt/VDEV1/dce-backups}"

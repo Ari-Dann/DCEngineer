@@ -1,0 +1,74 @@
+# Nginx reverse-proxy overlay. Use when REVERSE_PROXY=nginx.
+# docker compose -f docker-compose.nginx.yml up -d --build
+#
+# For TLS, put certificates in ./deploy/nginx/certs as fullchain.pem and privkey.pem
+# or terminate TLS on another device and point this at HTTP.
+
+name: dcengineer
+
+services:
+  dcengineer:
+    image: dcengineer:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dcengineer
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-UTC}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      DCE_HOSTNAME: ${DCE_HOSTNAME:-localhost}
+      DCE_PUBLIC_URL: ${DCE_PUBLIC_URL:-http://localhost}
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////data/dcengineer.db}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      STORAGE_LOCAL_PATH: ${STORAGE_LOCAL_PATH:-/data/files}
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
+      BACKUP_PATH: ${BACKUP_PATH:-/backups}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-6}
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      STATIC_DIR: /app/static
+    volumes:
+      - ${DCE_DATA_PATH:-./data}:/data
+      - ${DCE_BACKUP_HOST_PATH:-./backups}:/backups
+    networks:
+      - dce-internal
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+    labels:
+      - "com.dcengineer.stack=dcengineer"
+      - "com.dcengineer.proxy=nginx"
+    expose:
+      - "8080"
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: dcengineer-nginx
+    restart: unless-stopped
+    depends_on:
+      dcengineer:
+        condition: service_healthy
+    environment:
+      DCE_HOSTNAME: ${DCE_HOSTNAME:-localhost}
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/nginx/certs:/etc/nginx/certs:ro
+    networks:
+      - dce-internal
+    labels:
+      - "com.dcengineer.stack=dcengineer"
+      - "com.dcengineer.proxy=nginx"
+
+networks:
+  dce-internal:
+    name: dce-internal
+    driver: bridge

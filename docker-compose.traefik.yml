@@ -1,0 +1,55 @@
+name: dcengineer
+
+# Default stack for Traefik + Dockhand on an existing overlay network.
+# Nginx / Caddy overlays: docker-compose.nginx.yml, docker-compose.caddy.yml
+# NFS backup volume:     docker-compose.nfs.yml
+
+services:
+  dcengineer:
+    image: dcengineer:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dcengineer
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-UTC}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      DCE_HOSTNAME: ${DCE_HOSTNAME:-localhost}
+      DCE_PUBLIC_URL: ${DCE_PUBLIC_URL:-http://localhost:8080}
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////data/dcengineer.db}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      STORAGE_LOCAL_PATH: ${STORAGE_LOCAL_PATH:-/data/files}
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
+      BACKUP_PATH: ${BACKUP_PATH:-/backups}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-6}
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      STATIC_DIR: /app/static
+    volumes:
+      - ${DCE_DATA_PATH:-./data}:/data
+      - ${DCE_BACKUP_HOST_PATH:-./backups}:/backups
+    networks:
+      - traefik-net
+      - dce-internal
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+    # Traefik routing is provided by deploy/traefik/dynamic/dcengineer.yml
+    # (dynamic file, not container labels) so Dockhand stacks stay clean.
+    labels:
+      - "com.dcengineer.stack=dcengineer"
+      - "com.dcengineer.proxy=traefik"
+
+networks:
+  traefik-net:
+    external: true
+    name: ${TRAEFIK_NETWORK:-traefik-net}
+  dce-internal:
+    name: dce-internal
+    driver: bridge

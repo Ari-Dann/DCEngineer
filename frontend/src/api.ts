@@ -1,0 +1,459 @@
+export type Role = "admin" | "engineer" | "remote" | "viewer";
+
+export type Session = {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  role: Role;
+  username: string;
+  user_id: number;
+};
+
+const ACCESS = "dce.access";
+const REFRESH = "dce.refresh";
+const META = "dce.meta";
+const QUEUE = "dce.queue";
+
+export function getSession(): Session | null {
+  const raw = localStorage.getItem(META);
+  const access = localStorage.getItem(ACCESS);
+  const refresh = localStorage.getItem(REFRESH);
+  if (!raw || !access || !refresh) return null;
+  try {
+    return { ...JSON.parse(raw), access_token: access, refresh_token: refresh };
+  } catch {
+    return null;
+  }
+}
+
+export function setSession(s: Session) {
+  localStorage.setItem(ACCESS, s.access_token);
+  localStorage.setItem(REFRESH, s.refresh_token);
+  localStorage.setItem(META, JSON.stringify({ role: s.role, username: s.username, user_id: s.user_id, token_type: s.token_type }));
+}
+
+export function clearSession() {
+  localStorage.removeItem(ACCESS);
+  localStorage.removeItem(REFRESH);
+  localStorage.removeItem(META);
+}
+
+type QueueItem = { method: string; path: string; body: unknown };
+
+export function enqueue(item: QueueItem) {
+  const q = JSON.parse(localStorage.getItem(QUEUE) || "[]") as QueueItem[];
+  q.push(item);
+  localStorage.setItem(QUEUE, JSON.stringify(q));
+}
+
+export function queuedCount() {
+  try {
+    return (JSON.parse(localStorage.getItem(QUEUE) || "[]") as QueueItem[]).length;
+  } catch {
+    return 0;
+  }
+}
+
+async function raw(path: string, init: RequestInit = {}, token?: string) {
+  const headers = new Headers(init.headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  return fetch(path, { ...init, headers });
+}
+
+export async function api<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
+  let session = getSession();
+  let res = await raw(path, init, session?.access_token);
+  if (res.status === 401 && session?.refresh_token) {
+    const refreshed = await raw("/api/auth/refresh", {
+      method: "POST",
+      body: JSON.stringify({ refresh_token: session.refresh_token }),
+    });
+    if (refreshed.ok) {
+      const next = (await refreshed.json()) as Session;
+      setSession(next);
+      session = next;
+      res = await raw(path, init, next.access_token);
+    } else {
+      clearSession();
+      throw new Error("Session expired");
+    }
+  }
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body.detail || JSON.stringify(body);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  if (res.status === 204) return undefined as T;
+  const ct = res.headers.get("content-type") || "";
+  if (ct.includes("application/json")) return res.json() as Promise<T>;
+  return res as unknown as T;
+}
+
+export async function login(username: string, password: string) {
+  const s = await api<Session>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+  setSession(s);
+  return s;
+}
+
+export async function logout() {
+  const s = getSession();
+  if (s?.refresh_token) {
+    try {
+      await api("/api/auth/logout", { method: "POST", body: JSON.stringify({ refresh_token: s.refresh_token }) });
+    } catch {
+      /* ignore */
+    }
+  }
+  clearSession();
+}
+
+export async function flushQueue() {
+  const q = JSON.parse(localStorage.getItem(QUEUE) || "[]") as QueueItem[];
+  const remain: QueueItem[] = [];
+  for (const item of q) {
+    try {
+      await api(item.path, { method: item.method, body: JSON.stringify(item.body) });
+    } catch {
+      remain.push(item);
+    }
+  }
+  localStorage.setItem(QUEUE, JSON.stringify(remain));
+  return q.length - remain.length;
+}
+
+export const projects = {
+  list: () => api<Project[]>("/api/projects"),
+  get: (id: number) => api<Project>(`/api/projects/${id}`),
+  create: (body: Partial<Project> & { name: string }) => api<Project>("/api/projects", { method: "POST", body: JSON.stringify(body) }),
+  update: (id: number, body: Partial<Project> & { name: string }) =>
+    api<Project>(`/api/projects/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  areas: (id: number) => api<Area[]>(`/api/projects/${id}/areas`),
+  addArea: (id: number, body: Partial<Area> & { name: string }) =>
+    api<Area>(`/api/projects/${id}/areas`, { method: "POST", body: JSON.stringify(body) }),
+  racks: (id: number) => api<Rack[]>(`/api/projects/${id}/racks`),
+  addRack: (id: number, body: Partial<Rack> & { name: string }) =>
+    api<Rack>(`/api/projects/${id}/racks`, { method: "POST", body: JSON.stringify(body) }),
+  elevation: (pid: number, rid: number) => api<Elevation>(`/api/projects/${pid}/racks/${rid}/elevation`),
+  devices: (id: number, extra = "") => api<Device[]>(`/api/projects/${id}/devices${extra}`),
+  addDevice: (id: number, body: Partial<Device> & { name: string }) =>
+    api<Device>(`/api/projects/${id}/devices`, { method: "POST", body: JSON.stringify(body) }),
+  updateDevice: (pid: number, did: number, body: Partial<Device> & { name: string }) =>
+    api<Device>(`/api/projects/${pid}/devices/${did}`, { method: "PATCH", body: JSON.stringify(body) }),
+  pdus: (pid: number, rid: number) => api<PDU[]>(`/api/projects/${pid}/racks/${rid}/pdus`),
+  addPdu: (pid: number, rid: number, body: Partial<PDU> & { name: string }) =>
+    api<PDU>(`/api/projects/${pid}/racks/${rid}/pdus`, { method: "POST", body: JSON.stringify(body) }),
+  mapPort: (pid: number, pduId: number, portId: number, body: { port_label: string; device_id: number | null; notes: string }) =>
+    api<PDU>(`/api/projects/${pid}/pdus/${pduId}/ports/${portId}`, { method: "PATCH", body: JSON.stringify(body) }),
+  cables: (id: number) => api<Cable[]>(`/api/projects/${id}/cables`),
+  addCable: (id: number, body: Partial<Cable>) => api<Cable>(`/api/projects/${id}/cables`, { method: "POST", body: JSON.stringify(body) }),
+  handoffs: (id: number) => api<Handoff[]>(`/api/projects/${id}/handoffs`),
+  addHandoff: (id: number, body: Partial<Handoff> & { handoff_date: string }) =>
+    api<Handoff>(`/api/projects/${id}/handoffs`, { method: "POST", body: JSON.stringify(body) }),
+  checklists: (id: number) => api<Checklist[]>(`/api/projects/${id}/checklists`),
+  updateChecklist: (pid: number, cid: number, body: { title: string; template_key: string; items: { text: string; done: boolean }[] }) =>
+    api<Checklist>(`/api/projects/${pid}/checklists/${cid}`, { method: "PATCH", body: JSON.stringify(body) }),
+  exportUrl: (id: number) => `/api/projects/${id}/export.xlsx`,
+};
+
+export const ops = {
+  dashboard: () => api<Dashboard>("/api/dashboard"),
+  inspections: (project_id?: number) => api<Inspection[]>(`/api/inspections${project_id ? `?project_id=${project_id}` : ""}`),
+  addInspection: (body: Partial<Inspection> & { title: string }) =>
+    api<Inspection>("/api/inspections", { method: "POST", body: JSON.stringify(body) }),
+  patchInspection: (id: number, body: Partial<Inspection> & { title: string }) =>
+    api<Inspection>(`/api/inspections/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  incidents: (project_id?: number) => api<Incident[]>(`/api/incidents${project_id ? `?project_id=${project_id}` : ""}`),
+  addIncident: (body: Partial<Incident> & { title: string }) =>
+    api<Incident>("/api/incidents", { method: "POST", body: JSON.stringify(body) }),
+  patchIncident: (id: number, body: Partial<Incident> & { title: string }) =>
+    api<Incident>(`/api/incidents/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  workOrders: (project_id?: number) => api<WorkOrder[]>(`/api/work-orders${project_id ? `?project_id=${project_id}` : ""}`),
+  addWorkOrder: (body: Partial<WorkOrder> & { title: string }) =>
+    api<WorkOrder>("/api/work-orders", { method: "POST", body: JSON.stringify(body) }),
+  backupProcesses: () => api<BackupProc[]>("/api/backup-processes"),
+  addBackupProcess: (body: Partial<BackupProc> & { name: string }) =>
+    api<BackupProc>("/api/backup-processes", { method: "POST", body: JSON.stringify(body) }),
+  drills: () => api<Drill[]>("/api/dr-drills"),
+  addDrill: (body: Partial<Drill> & { title: string }) => api<Drill>("/api/dr-drills", { method: "POST", body: JSON.stringify(body) }),
+  capacity: () => api<Capacity[]>("/api/capacity"),
+  addCapacity: (body: Partial<Capacity> & { category: string }) =>
+    api<Capacity>("/api/capacity", { method: "POST", body: JSON.stringify(body) }),
+  appBackups: () => api<AppBackup[]>("/api/app-backups"),
+  triggerBackup: () => api<AppBackup>("/api/app-backups", { method: "POST" }),
+  users: () => api<User[]>("/api/users"),
+  addUser: (body: { username: string; email: string; password: string; full_name?: string; role: Role }) =>
+    api<User>("/api/users", { method: "POST", body: JSON.stringify(body) }),
+  me: () => api<User>("/api/auth/me"),
+};
+
+export async function downloadAuth(url: string, filename: string) {
+  const session = getSession();
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${session?.access_token}` } });
+  if (!res.ok) throw new Error("Download failed");
+  const blob = await res.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+export async function uploadFile(entity_type: string, entity_id: number, file: File, photography_restricted = false) {
+  const session = getSession();
+  const fd = new FormData();
+  fd.append("entity_type", entity_type);
+  fd.append("entity_id", String(entity_id));
+  fd.append("photography_restricted", photography_restricted ? "true" : "false");
+  fd.append("file", file);
+  const res = await fetch("/api/attachments", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${session?.access_token}` },
+    body: fd,
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export type Project = {
+  id: number;
+  name: string;
+  customer: string;
+  site_name: string;
+  site_address: string;
+  revision: string;
+  status: string;
+  sponsor: string;
+  escort_logistics: string;
+  badging_notes: string;
+  photography_rules: string;
+  data_handling_rules: string;
+  restricted_equipment_notes: string;
+  in_scope_summary: string;
+  discovery_port_access: string;
+  discovery_cdp_lldp: string;
+  discovery_saas_trial: string;
+  discovery_notes: string;
+  start_date?: string | null;
+  target_end_date?: string | null;
+};
+
+export type Area = {
+  id: number;
+  project_id: number;
+  name: string;
+  description: string;
+  in_scope: boolean;
+  restricted: boolean;
+  restriction_type: string;
+  photography_allowed: boolean;
+};
+
+export type Rack = {
+  id: number;
+  project_id: number;
+  area_id?: number | null;
+  name: string;
+  row_label: string;
+  position: string;
+  ru_height: number;
+  width_inches: number;
+  notes: string;
+};
+
+export type Device = {
+  id: number;
+  project_id: number;
+  rack_id?: number | null;
+  name: string;
+  hostname: string;
+  vendor: string;
+  model: string;
+  serial: string;
+  asset_tag: string;
+  device_type: string;
+  function: string;
+  ru_start?: number | null;
+  ru_end?: number | null;
+  restricted: boolean;
+  restricted_reason: string;
+  fan_orientation: string;
+  power_draw_watts?: number | null;
+  management_ip: string;
+  discovered_via: string;
+  undocumented: boolean;
+  eol_date?: string | null;
+  eos_date?: string | null;
+  eol_notes: string;
+  notes: string;
+  eol_status?: string | null;
+};
+
+export type PDU = {
+  id: number;
+  rack_id: number;
+  name: string;
+  bank: string;
+  vendor: string;
+  model: string;
+  serial: string;
+  feed: string;
+  amperage?: number | null;
+  voltage?: number | null;
+  phase: string;
+  outlet_count: number;
+  ports: { id: number; pdu_id: number; port_label: string; device_id?: number | null; notes: string }[];
+};
+
+export type Cable = {
+  id: number;
+  project_id: number;
+  rack_id?: number | null;
+  from_label: string;
+  from_port: string;
+  to_label: string;
+  to_port: string;
+  media: string;
+  color: string;
+  traced: boolean;
+  notes: string;
+};
+
+export type Handoff = {
+  id: number;
+  project_id: number;
+  handoff_date: string;
+  from_name: string;
+  to_name: string;
+  summary: string;
+  devices_captured: number;
+  issues: string;
+  follow_ups: string;
+};
+
+export type Checklist = {
+  id: number;
+  project_id: number;
+  template_key: string;
+  title: string;
+  items: { text: string; done: boolean }[];
+  completed_at?: string | null;
+};
+
+export type Elevation = { rack: Rack; devices: Device[]; slots: { u: number; device_id?: number | null }[] };
+
+export type Dashboard = {
+  projects: number;
+  racks: number;
+  devices: number;
+  restricted_devices: number;
+  undocumented_devices: number;
+  fan_issues: number;
+  eol_devices: number;
+  near_eol_devices: number;
+  open_incidents: number;
+  open_inspections: number;
+  open_work_orders: number;
+  last_app_backup?: string | null;
+  last_app_backup_status?: string | null;
+  storage_backend: string;
+};
+
+export type Inspection = {
+  id: number;
+  project_id?: number | null;
+  title: string;
+  itype: string;
+  status: string;
+  location: string;
+  findings: string;
+  checklist: { text: string; done: boolean }[];
+  due_at?: string | null;
+};
+
+export type Incident = {
+  id: number;
+  project_id?: number | null;
+  title: string;
+  severity: string;
+  status: string;
+  category: string;
+  vendor: string;
+  vendor_ticket: string;
+  affected_summary: string;
+  resolution: string;
+};
+
+export type WorkOrder = {
+  id: number;
+  title: string;
+  wtype: string;
+  status: string;
+  priority: string;
+  location: string;
+  description: string;
+  scheduled_at?: string | null;
+};
+
+export type BackupProc = {
+  id: number;
+  name: string;
+  system_name: string;
+  method: string;
+  schedule: string;
+  rpo_hours?: number | null;
+  rto_hours?: number | null;
+  last_verified?: string | null;
+  status: string;
+  notes: string;
+};
+
+export type Drill = {
+  id: number;
+  title: string;
+  scenario: string;
+  scheduled_at?: string | null;
+  participants: string;
+  findings: string;
+  procedure_updates: string;
+  status: string;
+};
+
+export type Capacity = {
+  id: number;
+  category: string;
+  current_value?: number | null;
+  max_value?: number | null;
+  unit: string;
+  notes: string;
+  recorded_at: string;
+};
+
+export type AppBackup = {
+  id: number;
+  filename: string;
+  size: number;
+  backend: string;
+  status: string;
+  detail: string;
+  created_at: string;
+};
+
+export type User = {
+  id: number;
+  username: string;
+  email: string;
+  full_name: string;
+  role: Role;
+  is_active: boolean;
+};
