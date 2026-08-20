@@ -1,0 +1,41 @@
+name: dcengineer-dev
+
+# Local / lab stack without Traefik. Exposes HTTP on DCE_PORT.
+#   docker compose -f docker-compose.dev.yml up -d --build
+
+services:
+  dcengineer:
+    image: dcengineer:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dcengineer
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-UTC}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-dev-only-change-me}
+      DCE_HOSTNAME: ${DCE_HOSTNAME:-localhost}
+      DCE_PUBLIC_URL: ${DCE_PUBLIC_URL:-http://localhost:8080}
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////data/dcengineer.db}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      STORAGE_LOCAL_PATH: /data/files
+      BACKUP_PATH: /backups
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      STATIC_DIR: /app/static
+      BOOTSTRAP_ADMIN_USER: ${BOOTSTRAP_ADMIN_USER:-admin}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-admin}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@localhost}
+    ports:
+      - "${DCE_PORT:-8080}:8080"
+    volumes:
+      - ${DCE_DATA_PATH:-./data}:/data
+      - ${DCE_BACKUP_HOST_PATH:-./backups}:/backups
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s

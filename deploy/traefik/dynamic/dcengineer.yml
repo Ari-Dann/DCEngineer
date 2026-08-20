@@ -1,0 +1,50 @@
+# Dynamic Traefik file for DCEngineer.
+# Copy to the Traefik dynamic directory (no container labels required).
+#
+# Danncloud:
+#   cp deploy/traefik/dynamic/dcengineer.yml \
+#      /opt/docker/Files/AppData/Config/traefik/dynamic/dcengineer.yml
+#
+# Requires the dcengineer container to be attached to traefik-net
+# (see docker-compose.yml). certResolver and entryPoint match the
+# existing Traefik stack: letsencrypt / websecure.
+
+http:
+  routers:
+    dcengineer:
+      rule: "Host(`dce.rootpcs.cloud`)"
+      entryPoints:
+        - websecure
+      service: dcengineer
+      tls:
+        certResolver: letsencrypt
+      middlewares:
+        - dcengineer-headers
+        - dcengineer-compress
+
+  services:
+    dcengineer:
+      loadBalancer:
+        servers:
+          - url: "http://dcengineer:8080"
+        passHostHeader: true
+        healthCheck:
+          path: /api/health
+          interval: 30s
+          timeout: 5s
+
+  middlewares:
+    dcengineer-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        forceSTSHeader: true
+        browserXssFilter: true
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: strict-origin-when-cross-origin
+        customResponseHeaders:
+          X-App: DCEngineer
+    dcengineer-compress:
+      compress: {}
