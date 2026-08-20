@@ -1,9 +1,10 @@
 const config = {
-  appId: "cloud.rootpcs.dcengineer",
+  appId: "app.dcengineer.mobile",
   appName: "DCEngineer",
   webDir: "dist",
   server: {
-    url: "https://dce.rootpcs.cloud",
+    // Set this to your DCE_PUBLIC_URL (example: https://dce.example.com)
+    url: "https://dce.example.com",
     androidScheme: "https",
   },
   android: {

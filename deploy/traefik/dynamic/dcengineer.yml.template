@@ -1,19 +1,17 @@
-# Example Traefik dynamic file (Host = dce.example.com).
-# For a real deploy, render from .env:
-#   bash scripts/render-traefik.sh /path/to/traefik/dynamic/dcengineer.yml
-#
-# Copy into the Traefik file-provider directory. The app container must
-# share TRAEFIK_NETWORK (default traefik-net) so the name dcengineer resolves.
+# Dynamic Traefik file for DCEngineer (no container labels).
+# Render with: bash scripts/render-traefik.sh [output-path]
+# Values come from DCE_HOSTNAME, TRAEFIK_ENTRYPOINT, TRAEFIK_CERT_RESOLVER,
+# and DCE_CONTAINER_NAME in the environment or .env.
 
 http:
   routers:
     dcengineer:
-      rule: "Host(`dce.example.com`)"
+      rule: "Host(`__DCE_HOSTNAME__`)"
       entryPoints:
-        - websecure
+        - __TRAEFIK_ENTRYPOINT__
       service: dcengineer
       tls:
-        certResolver: letsencrypt
+        certResolver: __TRAEFIK_CERT_RESOLVER__
       middlewares:
         - dcengineer-headers
         - dcengineer-compress
@@ -22,7 +20,7 @@ http:
     dcengineer:
       loadBalancer:
         servers:
-          - url: "http://dcengineer:8080"
+          - url: "http://__DCE_CONTAINER_NAME__:8080"
         passHostHeader: true
         healthCheck:
           path: /api/health
