@@ -1,0 +1,77 @@
+# Caddy reverse-proxy overlay with automatic HTTPS.
+# docker compose -f docker-compose.caddy.yml up -d --build
+
+name: dcengineer
+
+services:
+  dcengineer:
+    image: dcengineer:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dcengineer
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-UTC}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      DCE_HOSTNAME: ${DCE_HOSTNAME:-localhost}
+      DCE_PUBLIC_URL: ${DCE_PUBLIC_URL:-https://localhost}
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////data/dcengineer.db}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      STORAGE_LOCAL_PATH: ${STORAGE_LOCAL_PATH:-/data/files}
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
+      BACKUP_PATH: ${BACKUP_PATH:-/backups}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-6}
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      STATIC_DIR: /app/static
+    volumes:
+      - ${DCE_DATA_PATH:-./data}:/data
+      - ${DCE_BACKUP_HOST_PATH:-./backups}:/backups
+    networks:
+      - dce-internal
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+    labels:
+      - "com.dcengineer.stack=dcengineer"
+      - "com.dcengineer.proxy=caddy"
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2.9-alpine
+    container_name: dcengineer-caddy
+    restart: unless-stopped
+    depends_on:
+      dcengineer:
+        condition: service_healthy
+    environment:
+      DCE_HOSTNAME: ${DCE_HOSTNAME:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
+    ports:
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - dce-internal
+    labels:
+      - "com.dcengineer.stack=dcengineer"
+      - "com.dcengineer.proxy=caddy"
+
+networks:
+  dce-internal:
+    name: dce-internal
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:
