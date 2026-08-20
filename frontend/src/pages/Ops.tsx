@@ -30,7 +30,7 @@ export default function Ops() {
 
       <div className="card" style={{ marginBottom: 16 }}>
         <h3>Application backups</h3>
-        <p className="muted">SQLite + local files archived to BACKUP_PATH (Tleilax NFS on Danncloud).</p>
+        <p className="muted">SQLite + local files archived to BACKUP_PATH (set in .env; often an NFS mount on your NAS).</p>
         <button className="btn primary" onClick={async () => { const r = await ops.triggerBackup(); setMsg(`${r.status}: ${r.filename}`); load(); }}>
           Run backup now
         </button>

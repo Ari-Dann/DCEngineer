@@ -4,9 +4,11 @@ Browser PWA is the primary client. Use this only when you want a sideloadable AP
 
 DCEngineer does **not** require Google Play Services, Firebase, or FCM. That is intentional for GrapheneOS.
 
+Set `DCE_PUBLIC_URL` (and Capacitor `server.url` if you wrap a live site) to **your** hostname from `.env`.
+
 ## Option A — PWA (recommended on GrapheneOS)
 
-1. Open `https://dce.rootpcs.cloud` in Vanadium.
+1. Open `https://${DCE_HOSTNAME}` (example: `https://dce.example.com`) in Vanadium.
 2. Menu → **Install app** / **Add to Home screen**.
 3. Grant camera only when scanning serials or taking rack photos.
 
@@ -24,8 +26,9 @@ npm install
 npm install @capacitor/core @capacitor/cli @capacitor/android
 npm run build
 
-# Live against your VPS (recommended) — set the production URL
-export DCE_PUBLIC_URL=https://dce.rootpcs.cloud
+# Live against your hosted GUI
+export DCE_PUBLIC_URL=https://dce.example.com
+# set frontend/capacitor.config.ts server.url to the same value
 npx cap add android
 npx cap sync android
 
@@ -45,6 +48,6 @@ Copy the APK to the phone (Syncthing, `adb install`, or a private F-Droid repo).
 
 ## Networking
 
-The APK should reach `dce.rootpcs.cloud` over the internet or over Zerotier/Tailscale/Twingate, same as a browser. If you only expose the app on `10.20.30.254`, set `DCE_PUBLIC_URL` to that HTTP(S) URL and install your internal CA on the device.
+The APK should reach `${DCE_PUBLIC_URL}` over the internet or over your overlay VPN (ZeroTier, Tailscale, Twingate), same as a browser. If you only expose the app on an overlay address, set `DCE_PUBLIC_URL` to that HTTPS URL and install your internal CA on the device.
 
 Do not embed JWT secrets in the APK. Tokens are issued at login and stored in the WebView.

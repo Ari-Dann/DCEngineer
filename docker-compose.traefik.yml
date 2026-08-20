@@ -1,12 +1,13 @@
 name: dcengineer
 
-# Default stack for Traefik + Dockhand on an existing overlay network.
+# Traefik stack on an existing overlay network (TRAEFIK_NETWORK).
+# Routing is a dynamic YAML file (scripts/render-traefik.sh), not labels.
 # Nginx / Caddy overlays: docker-compose.nginx.yml, docker-compose.caddy.yml
 # NFS backup volume:     docker-compose.nfs.yml
 
 services:
   dcengineer:
-    image: dcengineer:local
+    image: ${DCE_IMAGE:-ghcr.io/ari-dann/dcengineer:latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -40,8 +41,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 25s
-    # Traefik routing is provided by deploy/traefik/dynamic/dcengineer.yml
-    # (dynamic file, not container labels) so Dockhand stacks stay clean.
+    # Traefik routing: deploy/traefik/dynamic/dcengineer.yml (file provider).
     labels:
       - "com.dcengineer.stack=dcengineer"
       - "com.dcengineer.proxy=traefik"

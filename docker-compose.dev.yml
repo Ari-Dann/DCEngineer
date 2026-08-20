@@ -5,7 +5,7 @@ name: dcengineer-dev
 
 services:
   dcengineer:
-    image: dcengineer:local
+    image: ${DCE_IMAGE:-dcengineer:local}
     build:
       context: .
       dockerfile: Dockerfile

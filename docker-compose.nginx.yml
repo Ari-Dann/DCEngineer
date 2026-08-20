@@ -8,7 +8,7 @@ name: dcengineer
 
 services:
   dcengineer:
-    image: dcengineer:local
+    image: ${DCE_IMAGE:-ghcr.io/ari-dann/dcengineer:latest}
     build:
       context: .
       dockerfile: Dockerfile

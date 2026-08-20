@@ -1,6 +1,8 @@
 # DCEngineer
 
-Self-hosted assistant for datacenter engineers. Browser-first PWA (desktop, tablet, GrapheneOS / Vanadium), JWTAuth API, and a single Docker image you can publish on Traefik, Nginx, or Caddy.
+Self-hosted assistant for datacenter engineers. Browser-first PWA (desktop, tablet, GrapheneOS / Vanadium), JWTAuth API, and a single container image published on GitHub Container Registry as **`ghcr.io/ari-dann/dcengineer:latest`**.
+
+This repository is meant to be used as a **GitHub template** (Settings → General → Template repository) and/or cloned as-is. Put site-specific names, IPs, and overlay-VPN details only in your private `.env` — never in git.
 
 It covers day-to-day operations **and** the four-phase Reliable Baseline Inventory (RBI) engagement:
 
@@ -21,99 +23,143 @@ Standing duties live under **Work** and **More**: inspections / PM, incidents wi
 Browser / PWA / Capacitor APK
         │  HTTPS + JWTAuth (Bearer access + refresh)
         ▼
-Traefik (or Nginx / Caddy)  →  dcengineer:8080
+Caddy, Traefik, or Nginx  →  dcengineer:8080
         │
         ├─ SQLite (default) or Postgres via DATABASE_URL
         ├─ Attachments: local | nfs bind-mount | SFTP
-        └─ App backups: tar.gz into BACKUP_PATH (NFS to TrueNAS)
+        └─ App backups: tar.gz into BACKUP_PATH
 ```
 
-One container serves the API and the built SPA. No inline Traefik labels — routing is a **dynamic YAML file**, which matches Dockhand + a shared `traefik-net`.
+One container serves the API and the built SPA. Traefik routing uses a **dynamic YAML file** (no container labels) so compose UIs stay clean.
 
 ---
 
-## Quick start (any host)
+## Image (`:latest`)
+
+Every push to `main` publishes:
+
+```text
+ghcr.io/ari-dann/dcengineer:latest
+```
+
+plus a short SHA tag. Pull it instead of building when you only want to run the app:
+
+```bash
+docker pull ghcr.io/ari-dann/dcengineer:latest
+```
+
+Override the image in `.env`:
+
+```bash
+DCE_IMAGE=ghcr.io/ari-dann/dcengineer:latest
+```
+
+Forks and template copies should change `DCE_IMAGE` to their own GHCR repo, or keep building locally with `docker-compose.dev.yml`.
+
+The GHCR package must be **public** (GitHub → Packages → `dcengineer` → Package settings → Change visibility) so unauthenticated `docker pull` works.
+
+---
+
+## Quick start
 
 ```bash
 git clone https://github.com/Ari-Dann/DCEngineer.git
 cd DCEngineer
 cp .env.example .env
-# set JWT_SECRET, BOOTSTRAP_ADMIN_PASSWORD, DCE_HOSTNAME, CORS_ORIGINS
+# set JWT_SECRET, BOOTSTRAP_ADMIN_PASSWORD, DCE_HOSTNAME, DCE_PUBLIC_URL, CORS_ORIGINS
 python3 -c "import secrets; print(secrets.token_urlsafe(64))"
 
-# without an existing reverse proxy:
+# lab / no reverse proxy (builds locally):
 docker compose -f docker-compose.dev.yml up -d --build
 # open http://localhost:8080  (bootstrap user from .env)
+
+# production (pull :latest, Caddy with automatic HTTPS):
+docker compose pull
+docker compose up -d
 ```
 
 Generate a real `JWT_SECRET` before anything is public. Change the bootstrap password on first login.
 
 ---
 
-## Danncloud (Traefik + Dockhand) — `dce.rootpcs.cloud`
+## Production host (generic VPS)
 
-Target host: Debian 13, Docker 29, Traefik (`entryPoint=websecure`, `certResolver=letsencrypt`), overlay network `traefik-net`, Dockhand already on that network. Public name `dce.rootpcs.cloud`. Backups to TrueNAS **Tleilax** `10.20.30.3:/mnt/VDEV1/dce-backups` over Zerotier.
+Recommended shape: a public-facing Docker host, Traefik or Caddy for TLS, data on local disk, backups on a NAS over an overlay VPN (ZeroTier, Tailscale, Twingate, or WireGuard). All of the names below are **examples** — replace them in `.env`.
 
-### 1. NFS mount on Danncloud (recommended)
+| Setting | Example | Your `.env` variable |
+| --- | --- | --- |
+| Public hostname | `dce.example.com` | `DCE_HOSTNAME`, `DCE_PUBLIC_URL`, `CORS_ORIGINS` |
+| Container image | `ghcr.io/ari-dann/dcengineer:latest` | `DCE_IMAGE` |
+| App data on the VPS | `./data` or `/opt/dcengineer/data` | `DCE_DATA_PATH` |
+| Backup NAS | `nas.example.net` | `NFS_HOST`, `BACKUP_NFS_HOST` |
+| NFS export | `/mnt/pool/dce-backups` | `NFS_EXPORT`, `BACKUP_NFS_EXPORT` |
+| Host mount for backups | `/mnt/dce-backups` | `DCE_BACKUP_HOST_PATH` |
+| Overlay VPN | your mesh IPs / hostnames | used only in fstab / firewall, not in git |
+| Traefik network | `traefik-net` | `TRAEFIK_NETWORK` |
+| Traefik entrypoint / resolver | `websecure` / `letsencrypt` | `TRAEFIK_ENTRYPOINT`, `TRAEFIK_CERT_RESOLVER` |
+| ACME email | `admin@example.com` | `ACME_EMAIL` |
 
-Docker bind-mounting a **host** NFS mount is more reliable than the NFS volume driver across reboots.
+### 1. NFS backup mount (recommended)
+
+Bind-mounting a **host** NFS mount is more reliable than the NFS volume driver across reboots.
 
 ```bash
-sudo mkdir -p /mnt/dce-backups /opt/docker/Files/dcengineer
-echo '10.20.30.3:/mnt/VDEV1/dce-backups /mnt/dce-backups nfs defaults,_netdev,nofail,nfsvers=4 0 0' | sudo tee -a /etc/fstab
+sudo mkdir -p /mnt/dce-backups /opt/dcengineer
+# replace nas.example.net and the export path with your NAS
+echo 'nas.example.net:/mnt/pool/dce-backups /mnt/dce-backups nfs defaults,_netdev,nofail,nfsvers=4 0 0' | sudo tee -a /etc/fstab
 sudo mount -a
 ```
 
-On Tleilax, export `/mnt/VDEV1/dce-backups` to `10.20.30.254` (or the Zerotier net) with maproot/anonuid matching `PUID`/`PGID` if you do not squash to root.
+On the NAS, export that path to the Docker host (or the overlay-VPN prefix) with maproot/anonuid matching `PUID`/`PGID` if you do not squash to root.
 
-### 2. Install from GitHub
+### 2. Install
 
 ```bash
-sudo git clone https://github.com/Ari-Dann/DCEngineer.git /opt/docker/Files/dcengineer
-cd /opt/docker/Files/dcengineer
-sudo cp .env.danncloud.example .env
-sudo nano .env          # JWT_SECRET + bootstrap password
+sudo git clone https://github.com/Ari-Dann/DCEngineer.git /opt/dcengineer
+cd /opt/dcengineer
+sudo cp .env.example .env
+sudo nano .env          # JWT_SECRET, hostname, backup paths
 ```
 
-Or run the helper (as root):
+Or run the helper (as root; all paths are variables):
 
 ```bash
-sudo bash scripts/install-danncloud.sh
+sudo \
+  DCE_HOSTNAME=dce.example.com \
+  NFS_HOST=nas.example.net \
+  NFS_EXPORT=/mnt/pool/dce-backups \
+  bash scripts/install-host.sh
 ```
 
 ### 3. Traefik dynamic file (no container labels)
 
+Render `Host($DCE_HOSTNAME)` from `.env` and copy it into your Traefik file-provider directory:
+
 ```bash
-sudo cp deploy/traefik/dynamic/dcengineer.yml \
-  /opt/docker/Files/AppData/Config/traefik/dynamic/dcengineer.yml
+bash scripts/render-traefik.sh /opt/traefik/dynamic/dcengineer.yml
 ```
 
-That file routes `Host(dce.rootpcs.cloud)` on `websecure` with `certResolver: letsencrypt` to `http://dcengineer:8080`. Traefik must be able to resolve the container name `dcengineer` on `traefik-net`.
+The example file `deploy/traefik/dynamic/dcengineer.yml` uses `dce.example.com`. Traefik must resolve the container name `dcengineer` (or `DCE_CONTAINER_NAME`) on `${TRAEFIK_NETWORK}`.
 
-If Traefik does not watch that directory yet, add a file provider pointing at `/opt/docker/Files/AppData/Config/traefik/dynamic`.
+If Traefik does not watch that directory yet, add a file provider pointing at it.
 
 ### 4. DNS
 
-Create an A (or CNAME) record: `dce.rootpcs.cloud` → Danncloud public IP `187.124.90.153`. Let's Encrypt needs 80/443 reachable for HTTP-01 (or already configured DNS-01).
+Create an A or CNAME record: `${DCE_HOSTNAME}` → the Docker host's public (or overlay) address. Let's Encrypt needs 80/443 reachable for HTTP-01 (or already configured DNS-01).
 
-### 5. Dockhand
+### 5. Compose UI (Portainer, Dockge, Dockhand, …)
 
-Create a stack named `dcengineer` from `/opt/docker/Files/dcengineer/docker-compose.yml` with the `.env` in the same directory. Confirm:
+Create a stack named `dcengineer` from this directory's compose file with `.env` beside it. Confirm:
 
-- network **traefik-net** is external
-- container name is **dcengineer**
-- volumes: data on SSD, backups on `/mnt/dce-backups`
+- the reverse-proxy network is attached (Traefik: external `${TRAEFIK_NETWORK}`)
+- container name is `${DCE_CONTAINER_NAME}` (default `dcengineer`)
+- volumes: app data on the VPS SSD, backups on the NAS mount
 
-Then deploy. Health: `https://dce.rootpcs.cloud/api/health`.
+Health: `https://${DCE_HOSTNAME}/api/health`.
 
-### 6. Overlay VPN for others
+### 6. Overlay VPN (ZeroTier / Tailscale / Twingate)
 
-Zerotier is already on `10.20.30.254/24`. Tailscale / Twingate users should:
-
-1. Join the same overlay.
-2. Either keep public HTTPS (Traefik) or set `DCE_PUBLIC_URL` / `CORS_ORIGINS` to the overlay URL and firewall 443 to overlay-only.
-
-Storage knobs they change in `.env`:
+Join the Docker host and the NAS to the same overlay. Either keep public HTTPS or set `DCE_PUBLIC_URL` / `CORS_ORIGINS` to the overlay URL and firewall 443 to overlay-only.
 
 | Variable | Purpose |
 | --- | --- |
@@ -134,27 +180,28 @@ docker compose -f docker-compose.yml -f docker-compose.nfs.yml up -d
 
 ## Reverse proxies
 
-Default **git branch / compose file is Caddy** (automatic HTTPS). Traefik and Nginx remain first-class overlays.
+Default `docker-compose.yml` is **Caddy** (automatic HTTPS). Traefik and Nginx are overlays.
 
 | Proxy | Compose file | Extra config |
 | --- | --- | --- |
-| Caddy (this branch) | `docker-compose.yml` | `deploy/caddy/Caddyfile`, `ACME_EMAIL`, `DCE_HOSTNAME` |
-| Traefik | `docker-compose.traefik.yml` | `deploy/traefik/dynamic/dcengineer.yml` |
+| Caddy | `docker-compose.yml` | `deploy/caddy/Caddyfile`, `ACME_EMAIL`, `DCE_HOSTNAME` |
+| Traefik | `docker-compose.traefik.yml` | `scripts/render-traefik.sh` → dynamic YAML |
 | Nginx | `docker-compose.nginx.yml` | `deploy/nginx/nginx.conf` + `deploy/nginx/certs/{fullchain,privkey}.pem` |
 | None (lab) | `docker-compose.dev.yml` | publishes `8080` |
 
 ```bash
-# caddy (automatic HTTPS)
-docker compose up -d --build
+# caddy (automatic HTTPS), using GHCR :latest
+docker compose pull && docker compose up -d
 
 # traefik (existing proxy network)
-docker compose -f docker-compose.traefik.yml up -d --build
+docker compose -f docker-compose.traefik.yml pull
+docker compose -f docker-compose.traefik.yml up -d
 
 # nginx
 docker compose -f docker-compose.nginx.yml up -d --build
 ```
 
-ENV used by those files: `DCE_HOSTNAME`, `TRAEFIK_NETWORK`, `TRAEFIK_ENTRYPOINT`, `TRAEFIK_CERT_RESOLVER`, `NGINX_HTTP_PORT`, `NGINX_HTTPS_PORT`, `CADDY_HTTP_PORT`, `CADDY_HTTPS_PORT`, `ACME_EMAIL`.
+ENV used by those files: `DCE_IMAGE`, `DCE_HOSTNAME`, `TRAEFIK_NETWORK`, `TRAEFIK_ENTRYPOINT`, `TRAEFIK_CERT_RESOLVER`, `NGINX_HTTP_PORT`, `NGINX_HTTPS_PORT`, `CADDY_HTTP_PORT`, `CADDY_HTTPS_PORT`, `ACME_EMAIL`.
 
 ---
 
@@ -171,13 +218,13 @@ Bootstrap admin is created **only when the user table is empty** (`BOOTSTRAP_ADM
 
 ## Browser, tablet, GrapheneOS
 
-1. Open `https://dce.rootpcs.cloud` and sign in.
+1. Open `https://${DCE_HOSTNAME}` (for example `https://dce.example.com`) and sign in.
 2. **Install app** / Add to Home screen (Vanadium, Firefox, Chrome, Edge).
-3. Use **Capture** on the floor: large controls, rear camera, optional barcode scan (`BarcodeDetector`), photo upload, offline queue if Zerotier drops.
+3. Use **Capture** on the floor: large controls, rear camera, optional barcode scan (`BarcodeDetector`), photo upload, offline queue if the overlay VPN drops.
 
 Android APK (no Google Play Services): see [`android/README.md`](android/README.md).
 
-API docs while signed in to the network: `https://dce.rootpcs.cloud/docs`.
+API docs: `https://${DCE_HOSTNAME}/docs`.
 
 ---
 
@@ -198,7 +245,7 @@ cd frontend && npm install && npm run build
 # npm run dev
 ```
 
-CI (GitHub Actions) runs pytest and `npm run build` on every push.
+CI runs pytest and `npm run build` on every push. The image workflow publishes `:latest` from `main`.
 
 ---
 
@@ -210,7 +257,7 @@ frontend/             React + Vite PWA
 deploy/traefik|nginx|caddy
 docker-compose*.yml
 .env.example
-.env.danncloud.example
-scripts/install-danncloud.sh
+scripts/install-host.sh
+scripts/render-traefik.sh
 android/README.md
 ```
