@@ -1,0 +1,12 @@
+# Copy this file next to dcengineer.yml and change the Host rule when
+# deploying a second instance. All hostnames are Traefik Host() matchers.
+
+http:
+  routers:
+    dcengineer-alt:
+      rule: "Host(`${DCE_HOSTNAME}`)"
+      entryPoints:
+        - websecure
+      service: dcengineer
+      tls:
+        certResolver: letsencrypt
