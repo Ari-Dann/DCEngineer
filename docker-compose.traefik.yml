@@ -1,7 +1,8 @@
-# Caddy reverse-proxy overlay with automatic HTTPS.
-# docker compose -f docker-compose.caddy.yml up -d --build
-
 name: dcengineer
+
+# Default stack for Traefik + Dockhand on an existing overlay network.
+# Nginx / Caddy overlays: docker-compose.nginx.yml, docker-compose.caddy.yml
+# NFS backup volume:     docker-compose.nfs.yml
 
 services:
   dcengineer:
@@ -17,7 +18,7 @@ services:
       TZ: ${TZ:-UTC}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       DCE_HOSTNAME: ${DCE_HOSTNAME:-localhost}
-      DCE_PUBLIC_URL: ${DCE_PUBLIC_URL:-https://localhost}
+      DCE_PUBLIC_URL: ${DCE_PUBLIC_URL:-http://localhost:8080}
       DATABASE_URL: ${DATABASE_URL:-sqlite:////data/dcengineer.db}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
       STORAGE_LOCAL_PATH: ${STORAGE_LOCAL_PATH:-/data/files}
@@ -31,6 +32,7 @@ services:
       - ${DCE_DATA_PATH:-./data}:/data
       - ${DCE_BACKUP_HOST_PATH:-./backups}:/backups
     networks:
+      - traefik-net
       - dce-internal
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
@@ -38,40 +40,16 @@ services:
       timeout: 5s
       retries: 3
       start_period: 25s
+    # Traefik routing is provided by deploy/traefik/dynamic/dcengineer.yml
+    # (dynamic file, not container labels) so Dockhand stacks stay clean.
     labels:
       - "com.dcengineer.stack=dcengineer"
-      - "com.dcengineer.proxy=caddy"
-    expose:
-      - "8080"
-
-  caddy:
-    image: caddy:2.9-alpine
-    container_name: dcengineer-caddy
-    restart: unless-stopped
-    depends_on:
-      dcengineer:
-        condition: service_healthy
-    environment:
-      DCE_HOSTNAME: ${DCE_HOSTNAME:-localhost}
-      ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
-    ports:
-      - "${CADDY_HTTP_PORT:-80}:80"
-      - "${CADDY_HTTPS_PORT:-443}:443"
-    volumes:
-      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    networks:
-      - dce-internal
-    labels:
-      - "com.dcengineer.stack=dcengineer"
-      - "com.dcengineer.proxy=caddy"
+      - "com.dcengineer.proxy=traefik"
 
 networks:
+  traefik-net:
+    external: true
+    name: ${TRAEFIK_NETWORK:-traefik-net}
   dce-internal:
     name: dce-internal
     driver: bridge
-
-volumes:
-  caddy_data:
-  caddy_config:

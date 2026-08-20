@@ -134,21 +134,24 @@ docker compose -f docker-compose.yml -f docker-compose.nfs.yml up -d
 
 ## Reverse proxies
 
-Default branch / compose file is **Traefik + dynamic YAML**. Nginx and Caddy are first-class overlays (and have their own git branches so a fork can default to that proxy).
+Default **git branch / compose file is Caddy** (automatic HTTPS). Traefik and Nginx remain first-class overlays.
 
 | Proxy | Compose file | Extra config |
 | --- | --- | --- |
-| Traefik | `docker-compose.yml` | `deploy/traefik/dynamic/dcengineer.yml` |
+| Caddy (this branch) | `docker-compose.yml` | `deploy/caddy/Caddyfile`, `ACME_EMAIL`, `DCE_HOSTNAME` |
+| Traefik | `docker-compose.traefik.yml` | `deploy/traefik/dynamic/dcengineer.yml` |
 | Nginx | `docker-compose.nginx.yml` | `deploy/nginx/nginx.conf` + `deploy/nginx/certs/{fullchain,privkey}.pem` |
-| Caddy | `docker-compose.caddy.yml` | `deploy/caddy/Caddyfile`, `ACME_EMAIL`, `DCE_HOSTNAME` |
 | None (lab) | `docker-compose.dev.yml` | publishes `8080` |
 
 ```bash
+# caddy (automatic HTTPS)
+docker compose up -d --build
+
+# traefik (existing proxy network)
+docker compose -f docker-compose.traefik.yml up -d --build
+
 # nginx
 docker compose -f docker-compose.nginx.yml up -d --build
-
-# caddy (automatic HTTPS)
-docker compose -f docker-compose.caddy.yml up -d --build
 ```
 
 ENV used by those files: `DCE_HOSTNAME`, `TRAEFIK_NETWORK`, `TRAEFIK_ENTRYPOINT`, `TRAEFIK_CERT_RESOLVER`, `NGINX_HTTP_PORT`, `NGINX_HTTPS_PORT`, `CADDY_HTTP_PORT`, `CADDY_HTTPS_PORT`, `ACME_EMAIL`.
