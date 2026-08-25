@@ -220,7 +220,26 @@ Bootstrap admin is created **only when the user table is empty** (`BOOTSTRAP_ADM
 
 1. Open `https://${DCE_HOSTNAME}` (for example `https://dce.example.com`) and sign in.
 2. **Install app** / Add to Home screen (Vanadium, Firefox, Chrome, Edge).
-3. Use **Capture** on the floor: large controls, rear camera, optional barcode scan (`BarcodeDetector`), photo upload, offline queue if the overlay VPN drops.
+3. Use **Capture** on the floor: large controls, a visible camera window for serial scan, in-app photos (not saved to the phone/tablet gallery), vendor/model dropdowns with an editable **Other**, and a locate search that maps logical identity onto a rack + RU. Offline queue still stores device fields if the overlay VPN drops.
+
+### Edit after capture
+
+Every device field can be corrected later: click a device in Capture, the project Devices table, Lifecycle, or a filled RU on the rack elevation. Rack height is not limited to 42U — presets include 45, 47, 48, 52, and 58U, and any value from 1–70U is allowed. Placing a device above the current rack height grows the rack automatically.
+
+### Import CSV / XLSX
+
+Project → **Devices** → choose a `.csv` or `.xlsx` file (legacy `.xls` is rejected). Headers are matched flexibly, for example:
+
+```text
+name,hostname,vendor,model,serial,asset tag,rack,ru start,height,type,function,management ip,notes,eol,eos
+core-rtr,core-rtr.site,Cisco,ASR 1001-X,FCW1234,A-100,A01,47,2,router,WAN edge,10.0.0.1,,2030-01-01,
+```
+
+Rows with a matching serial are updated; others are created. Missing rack names are created (default 42U, grown if the RU is higher). Devices with no rack stay **unlocated** until you assign them under **Locate** or Capture.
+
+### Photos
+
+**Capture photo** uses `getUserMedia` and a canvas JPEG. Files are uploaded as attachments on the current entity (device, rack, area, project, inspection, incident, or work order). Multiple photos per device are supported. Restricted (government / EMSS) equipment blocks photography.
 
 Android APK (no Google Play Services): see [`android/README.md`](android/README.md).
 

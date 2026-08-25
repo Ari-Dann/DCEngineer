@@ -2,7 +2,8 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -26,6 +27,7 @@ from app.models import (
     User,
     WorkOrder,
 )
+from app.importer import import_devices
 from app.rbi_export import eol_status
 from app.schemas import (
     AreaIn,
@@ -42,6 +44,7 @@ from app.schemas import (
     DRDrillOut,
     DeviceIn,
     DeviceOut,
+    DevicePatch,
     HandoffIn,
     HandoffOut,
     IncidentIn,
@@ -80,6 +83,17 @@ def device_out(dev: Device) -> DeviceOut:
     out = DeviceOut.model_validate(dev)
     out.eol_status = eol_status(dev.eol_date)
     return out
+
+
+def _ensure_rack_fits(db: Session, rack_id: int | None, ru_end: int | None) -> None:
+    if not rack_id or ru_end is None:
+        return
+    rack = db.get(Rack, rack_id)
+    if not rack:
+        return
+    end = int(ru_end)
+    if end > rack.ru_height:
+        rack.ru_height = min(70, end)
 
 
 @projects_router.get("", response_model=list[ProjectOut])
@@ -234,6 +248,7 @@ def list_devices(
     q: Optional[str] = None,
     rack_id: Optional[int] = None,
     eol: Optional[str] = None,
+    unlocated: Optional[bool] = None,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
@@ -241,14 +256,22 @@ def list_devices(
     query = db.query(Device).filter(Device.project_id == project_id)
     if rack_id:
         query = query.filter(Device.rack_id == rack_id)
+    if unlocated:
+        query = query.filter(Device.rack_id.is_(None) | Device.ru_start.is_(None))
     if q:
         like = f"%{q}%"
         query = query.filter(
-            Device.name.ilike(like)
-            | Device.serial.ilike(like)
-            | Device.vendor.ilike(like)
-            | Device.model.ilike(like)
-            | Device.hostname.ilike(like)
+            or_(
+                Device.name.ilike(like),
+                Device.serial.ilike(like),
+                Device.vendor.ilike(like),
+                Device.model.ilike(like),
+                Device.hostname.ilike(like),
+                Device.asset_tag.ilike(like),
+                Device.management_ip.ilike(like),
+                Device.function.ilike(like),
+                Device.notes.ilike(like),
+            )
         )
     devices = query.order_by(Device.name).all()
     out = [device_out(d) for d in devices]
@@ -257,11 +280,77 @@ def list_devices(
     return out
 
 
+@projects_router.get("/{project_id}/devices/{device_id}", response_model=DeviceOut)
+def get_device(project_id: int, device_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    device = db.get(Device, device_id)
+    if not device or device.project_id != project_id:
+        raise HTTPException(404, "Device not found")
+    return device_out(device)
+
+
+@projects_router.get("/{project_id}/search")
+def search_inventory(
+    project_id: int,
+    q: str = "",
+    unlocated: bool = False,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    _get_project(db, project_id)
+    query = db.query(Device).filter(Device.project_id == project_id)
+    if unlocated:
+        query = query.filter(Device.rack_id.is_(None) | Device.ru_start.is_(None))
+    if q.strip():
+        like = f"%{q.strip()}%"
+        query = query.filter(
+            or_(
+                Device.name.ilike(like),
+                Device.serial.ilike(like),
+                Device.vendor.ilike(like),
+                Device.model.ilike(like),
+                Device.hostname.ilike(like),
+                Device.asset_tag.ilike(like),
+                Device.management_ip.ilike(like),
+                Device.function.ilike(like),
+                Device.notes.ilike(like),
+            )
+        )
+    racks = {r.id: r for r in db.query(Rack).filter(Rack.project_id == project_id).all()}
+    hits = []
+    for dev in query.order_by(Device.name).limit(200).all():
+        item = device_out(dev).model_dump()
+        rack = racks.get(dev.rack_id) if dev.rack_id else None
+        item["rack_name"] = rack.name if rack else None
+        item["rack_row"] = rack.row_label if rack else None
+        hits.append(item)
+    return {"query": q, "count": len(hits), "devices": hits}
+
+
+@projects_router.post("/{project_id}/import")
+async def import_inventory(
+    project_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(WriteUser),
+):
+    _get_project(db, project_id)
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Empty file")
+    try:
+        result = import_devices(db, project_id, file.filename or "upload.csv", data, user.id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return result
+
+
 @projects_router.post("/{project_id}/devices", response_model=DeviceOut, status_code=201)
 def create_device(project_id: int, body: DeviceIn, db: Session = Depends(get_db), user: User = Depends(WriteUser)):
     _get_project(db, project_id)
     device = Device(project_id=project_id, captured_by=user.id, **body.model_dump())
     db.add(device)
+    db.flush()
+    _ensure_rack_fits(db, device.rack_id, device.ru_end)
     db.commit()
     db.refresh(device)
     return device_out(device)
@@ -269,12 +358,13 @@ def create_device(project_id: int, body: DeviceIn, db: Session = Depends(get_db)
 
 @projects_router.patch("/{project_id}/devices/{device_id}", response_model=DeviceOut)
 def update_device(
-    project_id: int, device_id: int, body: DeviceIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)
+    project_id: int, device_id: int, body: DevicePatch, db: Session = Depends(get_db), _: User = Depends(WriteUser)
 ):
     device = db.get(Device, device_id)
     if not device or device.project_id != project_id:
         raise HTTPException(404, "Device not found")
-    _apply(device, body.model_dump())
+    _apply(device, body.model_dump(exclude_unset=True))
+    _ensure_rack_fits(db, device.rack_id, device.ru_end)
     db.commit()
     db.refresh(device)
     return device_out(device)

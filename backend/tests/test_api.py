@@ -177,6 +177,156 @@ def test_ops_and_upload(client, auth):
     assert backup.json()["status"] in ("ok", "error")
 
 
+def test_catalog_edit_import_search_photos(client, auth):
+    catalog = client.get("/api/catalog", headers=auth)
+    assert catalog.status_code == 200, catalog.text
+    body = catalog.json()
+    assert "router" in body["device_types"]
+    names = [v["name"] for v in body["vendors"]]
+    for vendor in ("Cisco", "Juniper", "Arista", "MikroTik", "TRENDnet", "Dell", "HPE Aruba", "Fortinet", "Ubiquiti", "Netgear"):
+        assert vendor in names
+    assert 52 in body["rack_height_presets"]
+
+    project = client.post("/api/projects", headers=auth, json={"name": "Import Site", "customer": "Acme"})
+    assert project.status_code == 201, project.text
+    pid = project.json()["id"]
+
+    rack = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "A01", "row_label": "A", "ru_height": 42},
+    )
+    assert rack.status_code == 201
+    rid = rack.json()["id"]
+
+    device = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={
+            "name": "sw-typo",
+            "rack_id": rid,
+            "vendor": "Csico",
+            "model": "C9300",
+            "serial": "FCW-EDIT",
+            "device_type": "switch",
+            "ru_start": 47,
+            "ru_end": 48,
+        },
+    )
+    assert device.status_code == 201, device.text
+    did = device.json()["id"]
+    grown = client.get(f"/api/projects/{pid}/racks", headers=auth).json()
+    assert any(r["id"] == rid and r["ru_height"] >= 48 for r in grown)
+
+    tall = client.patch(
+        f"/api/projects/{pid}/racks/{rid}",
+        headers=auth,
+        json={"name": "A01", "row_label": "A", "position": "01", "ru_height": 52, "width_inches": 19, "notes": ""},
+    )
+    assert tall.status_code == 200
+    assert tall.json()["ru_height"] == 52
+
+    patched = client.patch(
+        f"/api/projects/{pid}/devices/{did}",
+        headers=auth,
+        json={"vendor": "Cisco", "model": "Catalyst 9300", "device_type": "router", "name": "sw-typo-fixed"},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["vendor"] == "Cisco"
+    assert patched.json()["serial"] == "FCW-EDIT"
+    assert patched.json()["device_type"] == "router"
+    assert patched.json()["name"] == "sw-typo-fixed"
+
+    csv_body = (
+        "name,hostname,vendor,model,serial,rack,ru start,height,type,function,management ip\n"
+        "core-rtr,core-rtr.site,Cisco,ASR 1001-X,SN-RTR,B12,47,2,router,WAN edge,10.0.0.1\n"
+        "logical-fw,fw1,Fortinet,FortiGate 200F,SN-UNLOCATED,,,,firewall,edge,\n"
+        "sw-typo-fixed,core-sw,Cisco,Catalyst 9300,FCW-EDIT,A01,50,2,switch,access,\n"
+    )
+    imported = client.post(
+        f"/api/projects/{pid}/import",
+        headers=auth,
+        files={"file": ("gear.csv", csv_body.encode(), "text/csv")},
+    )
+    assert imported.status_code == 200, imported.text
+    summary = imported.json()
+    assert summary["created"] >= 2
+    assert summary["updated"] >= 1
+    assert summary["racks_created"] >= 1
+
+    racks = {r["name"]: r for r in client.get(f"/api/projects/{pid}/racks", headers=auth).json()}
+    assert "B12" in racks
+    assert racks["B12"]["ru_height"] >= 48
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Name", "Serial", "Vendor", "Model", "Rack", "RU start", "Type"])
+    ws.append(["leaf-sw", "SN-XLSX", "Arista", "DCS-7050SX3-48YC8", "B12", 1, "switch"])
+    buf = BytesIO()
+    wb.save(buf)
+    xlsx = client.post(
+        f"/api/projects/{pid}/import",
+        headers=auth,
+        files={
+            "file": (
+                "gear.xlsx",
+                buf.getvalue(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert xlsx.status_code == 200, xlsx.text
+    assert xlsx.json()["created"] >= 1
+
+    bad = client.post(
+        f"/api/projects/{pid}/import",
+        headers=auth,
+        files={"file": ("legacy.xls", b"\xd0\xcf\x11\xe0", "application/vnd.ms-excel")},
+    )
+    assert bad.status_code == 400
+
+    search = client.get(f"/api/projects/{pid}/search", headers=auth, params={"q": "FortiGate", "unlocated": True})
+    assert search.status_code == 200, search.text
+    hits = search.json()["devices"]
+    assert any(h["serial"] == "SN-UNLOCATED" for h in hits)
+    unlocated_id = next(h["id"] for h in hits if h["serial"] == "SN-UNLOCATED")
+
+    located = client.patch(
+        f"/api/projects/{pid}/devices/{unlocated_id}",
+        headers=auth,
+        json={"rack_id": racks["B12"]["id"], "ru_start": 10, "ru_end": 10},
+    )
+    assert located.status_code == 200
+    assert located.json()["rack_id"] == racks["B12"]["id"]
+    assert located.json()["vendor"] == "Fortinet"
+
+    files = {"file": ("faceplate.jpg", BytesIO(b"\xff\xd8one"), "image/jpeg")}
+    a1 = client.post(
+        "/api/attachments",
+        headers=auth,
+        data={"entity_type": "device", "entity_id": str(did)},
+        files=files,
+    )
+    assert a1.status_code == 201, a1.text
+    files2 = {"file": ("rear.jpg", BytesIO(b"\xff\xd8two"), "image/jpeg")}
+    a2 = client.post(
+        "/api/attachments",
+        headers=auth,
+        data={"entity_type": "device", "entity_id": str(did)},
+        files=files2,
+    )
+    assert a2.status_code == 201
+    listed = client.get("/api/attachments", headers=auth, params={"entity_type": "device", "entity_id": did})
+    assert listed.status_code == 200
+    assert len(listed.json()) >= 2
+
+    got = client.get(f"/api/projects/{pid}/devices/{did}", headers=auth)
+    assert got.status_code == 200
+    assert got.json()["serial"] == "FCW-EDIT"
+
+
 def test_auth_required(client):
     res = client.get("/api/projects")
     assert res.status_code == 401

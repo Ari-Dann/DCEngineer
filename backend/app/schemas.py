@@ -119,7 +119,7 @@ class RackIn(BaseModel):
     area_id: Optional[int] = None
     row_label: str = ""
     position: str = ""
-    ru_height: int = 42
+    ru_height: int = Field(default=42, ge=1, le=70)
     width_inches: float = 19.0
     notes: str = ""
 
@@ -139,8 +139,8 @@ class DeviceIn(BaseModel):
     asset_tag: str = ""
     device_type: str = "server"
     function: str = ""
-    ru_start: Optional[int] = None
-    ru_end: Optional[int] = None
+    ru_start: Optional[int] = Field(default=None, ge=1, le=70)
+    ru_end: Optional[int] = Field(default=None, ge=1, le=70)
     restricted: bool = False
     restricted_reason: str = ""
     fan_orientation: str = "unknown"
@@ -152,6 +152,31 @@ class DeviceIn(BaseModel):
     eos_date: Optional[str] = None
     eol_notes: str = ""
     notes: str = ""
+
+
+class DevicePatch(BaseModel):
+    name: Optional[str] = None
+    rack_id: Optional[int] = None
+    hostname: Optional[str] = None
+    vendor: Optional[str] = None
+    model: Optional[str] = None
+    serial: Optional[str] = None
+    asset_tag: Optional[str] = None
+    device_type: Optional[str] = None
+    function: Optional[str] = None
+    ru_start: Optional[int] = Field(default=None, ge=1, le=70)
+    ru_end: Optional[int] = Field(default=None, ge=1, le=70)
+    restricted: Optional[bool] = None
+    restricted_reason: Optional[str] = None
+    fan_orientation: Optional[str] = None
+    power_draw_watts: Optional[int] = None
+    management_ip: Optional[str] = None
+    discovered_via: Optional[str] = None
+    undocumented: Optional[bool] = None
+    eol_date: Optional[str] = None
+    eos_date: Optional[str] = None
+    eol_notes: Optional[str] = None
+    notes: Optional[str] = None
 
 
 class DeviceOut(DeviceIn, ORMModel):

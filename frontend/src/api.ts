@@ -145,11 +145,26 @@ export const projects = {
   addRack: (id: number, body: Partial<Rack> & { name: string }) =>
     api<Rack>(`/api/projects/${id}/racks`, { method: "POST", body: JSON.stringify(body) }),
   elevation: (pid: number, rid: number) => api<Elevation>(`/api/projects/${pid}/racks/${rid}/elevation`),
+  updateRack: (pid: number, rid: number, body: Partial<Rack> & { name: string }) =>
+    api<Rack>(`/api/projects/${pid}/racks/${rid}`, { method: "PATCH", body: JSON.stringify(body) }),
   devices: (id: number, extra = "") => api<Device[]>(`/api/projects/${id}/devices${extra}`),
+  getDevice: (pid: number, did: number) => api<Device>(`/api/projects/${pid}/devices/${did}`),
   addDevice: (id: number, body: Partial<Device> & { name: string }) =>
     api<Device>(`/api/projects/${id}/devices`, { method: "POST", body: JSON.stringify(body) }),
-  updateDevice: (pid: number, did: number, body: Partial<Device> & { name: string }) =>
+  updateDevice: (pid: number, did: number, body: Partial<Device>) =>
     api<Device>(`/api/projects/${pid}/devices/${did}`, { method: "PATCH", body: JSON.stringify(body) }),
+  search: (id: number, q = "", unlocated = false) => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (unlocated) params.set("unlocated", "true");
+    const qs = params.toString();
+    return api<SearchResult>(`/api/projects/${id}/search${qs ? `?${qs}` : ""}`);
+  },
+  importFile: (id: number, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return api<ImportResult>(`/api/projects/${id}/import`, { method: "POST", body: fd });
+  },
   pdus: (pid: number, rid: number) => api<PDU[]>(`/api/projects/${pid}/racks/${rid}/pdus`),
   addPdu: (pid: number, rid: number, body: Partial<PDU> & { name: string }) =>
     api<PDU>(`/api/projects/${pid}/racks/${rid}/pdus`, { method: "POST", body: JSON.stringify(body) }),
@@ -209,20 +224,85 @@ export async function downloadAuth(url: string, filename: string) {
   URL.revokeObjectURL(a.href);
 }
 
+export type Attachment = {
+  id: number;
+  entity_type: string;
+  entity_id: number;
+  filename: string;
+  content_type: string;
+  size: number;
+  photography_restricted: boolean;
+  created_at: string;
+};
+
+export type SearchHit = Device & { rack_name?: string | null; rack_row?: string | null };
+export type SearchResult = { query: string; count: number; devices: SearchHit[] };
+export type ImportResult = {
+  created: number;
+  updated: number;
+  racks_created: number;
+  skipped: number;
+  rows: number;
+  errors: string[];
+};
+
+async function authFetch(path: string, init: RequestInit = {}) {
+  let session = getSession();
+  let res = await raw(path, init, session?.access_token);
+  if (res.status === 401 && session?.refresh_token) {
+    const refreshed = await raw("/api/auth/refresh", {
+      method: "POST",
+      body: JSON.stringify({ refresh_token: session.refresh_token }),
+    });
+    if (refreshed.ok) {
+      const next = (await refreshed.json()) as Session;
+      setSession(next);
+      res = await raw(path, init, next.access_token);
+    } else {
+      clearSession();
+      throw new Error("Session expired");
+    }
+  }
+  return res;
+}
+
 export async function uploadFile(entity_type: string, entity_id: number, file: File, photography_restricted = false) {
-  const session = getSession();
   const fd = new FormData();
   fd.append("entity_type", entity_type);
   fd.append("entity_id", String(entity_id));
   fd.append("photography_restricted", photography_restricted ? "true" : "false");
   fd.append("file", file);
-  const res = await fetch("/api/attachments", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${session?.access_token}` },
-    body: fd,
-  });
+  const res = await authFetch("/api/attachments", { method: "POST", body: fd });
   if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return res.json() as Promise<Attachment>;
+}
+
+export async function uploadPhotos(
+  entityType: string,
+  entityId: number,
+  files: File[],
+  photographyRestricted = false,
+) {
+  const out: Attachment[] = [];
+  for (const file of files) {
+    out.push(await uploadFile(entityType, entityId, file, photographyRestricted));
+  }
+  return out;
+}
+
+export function listAttachments(entityType: string, entityId: number) {
+  const params = new URLSearchParams({ entity_type: entityType, entity_id: String(entityId) });
+  return api<Attachment[]>(`/api/attachments?${params}`);
+}
+
+export function deleteAttachment(id: number) {
+  return api<{ ok: boolean }>(`/api/attachments/${id}`, { method: "DELETE" });
+}
+
+export async function fetchAttachmentBlob(id: number) {
+  const res = await authFetch(`/api/attachments/${id}/download`);
+  if (!res.ok) throw new Error("Download failed");
+  return URL.createObjectURL(await res.blob());
 }
 
 export type Project = {
