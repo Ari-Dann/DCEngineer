@@ -181,6 +181,13 @@ def trigger_backup(db: Session = Depends(get_db), _: User = Depends(WriteUser)):
     }
 
 
+@meta_router.get("/catalog")
+def catalog(_: User = Depends(get_current_user)):
+    from app.catalog import catalog_payload
+
+    return catalog_payload()
+
+
 @meta_router.get("/health")
 def health():
     settings = get_settings()

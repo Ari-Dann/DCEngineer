@@ -261,6 +261,8 @@ def rack_svg(rack: Rack, devices: list[Device]) -> str:
     colors = {
         "server": "#3d9cf0",
         "switch": "#3dbf8c",
+        "firewall": "#e87a4c",
+        "router": "#5ec8e8",
         "storage": "#9b7dff",
         "pdu": "#e8a317",
         "ups": "#e85d4c",
