@@ -45,6 +45,7 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
+    username: Optional[str] = None
     email: Optional[str] = None
     full_name: Optional[str] = None
     role: Optional[str] = None
@@ -398,3 +399,10 @@ class AttachmentOut(ORMModel):
     size: int
     photography_restricted: bool
     created_at: datetime
+
+
+class CatalogLearnIn(BaseModel):
+    vendor: Optional[str] = None
+    model: Optional[str] = None
+    device_type: Optional[str] = None
+    function: Optional[str] = None

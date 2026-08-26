@@ -19,7 +19,7 @@ from app.models import (
     WorkOrder,
 )
 from app.rbi_export import build_rbi_workbook, eol_status, rack_svg
-from app.schemas import AttachmentOut
+from app.schemas import AttachmentOut, CatalogLearnIn
 from app.storage import get_storage, new_key
 from app.backup import run_backup
 
@@ -182,10 +182,25 @@ def trigger_backup(db: Session = Depends(get_db), _: User = Depends(WriteUser)):
 
 
 @meta_router.get("/catalog")
-def catalog(_: User = Depends(get_current_user)):
+def catalog(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     from app.catalog import catalog_payload
 
-    return catalog_payload()
+    return catalog_payload(db)
+
+
+@meta_router.post("/catalog/learn")
+def learn_catalog(body: CatalogLearnIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)):
+    from app.catalog import catalog_payload, learn_values
+
+    learn_values(
+        db,
+        vendor=body.vendor or "",
+        model=body.model or "",
+        device_type=body.device_type or "",
+        function=body.function or "",
+    )
+    db.commit()
+    return catalog_payload(db)
 
 
 @meta_router.get("/health")

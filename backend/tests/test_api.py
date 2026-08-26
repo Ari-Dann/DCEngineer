@@ -330,3 +330,180 @@ def test_catalog_edit_import_search_photos(client, auth):
 def test_auth_required(client):
     res = client.get("/api/projects")
     assert res.status_code == 401
+
+
+def test_catalog_learns_other_values(client, auth):
+    learned = client.post(
+        "/api/catalog/learn",
+        headers=auth,
+        json={"vendor": "CustomOEM", "model": "Widget-9000", "device_type": "blade chassis", "function": "WAN edge"},
+    )
+    assert learned.status_code == 200, learned.text
+    body = learned.json()
+    names = [v["name"] for v in body["vendors"]]
+    assert "CustomOEM" in names
+    oem = next(v for v in body["vendors"] if v["name"] == "CustomOEM")
+    assert "Widget-9000" in oem["models"]
+    assert "blade chassis" in body["device_types"]
+    assert "WAN edge" in body["functions"]
+
+    project = client.post("/api/projects", headers=auth, json={"name": "Catalog persist"})
+    pid = project.json()["id"]
+    device = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={"name": "custom-box", "vendor": "SiteGear", "model": "SG-12", "device_type": "console", "function": "OOB"},
+    )
+    assert device.status_code == 201, device.text
+    catalog = client.get("/api/catalog", headers=auth).json()
+    names = [v["name"] for v in catalog["vendors"]]
+    assert "SiteGear" in names
+    site = next(v for v in catalog["vendors"] if v["name"] == "SiteGear")
+    assert "SG-12" in site["models"]
+    assert "console" in catalog["device_types"]
+    assert "OOB" in catalog["functions"]
+
+
+def test_admin_can_edit_user_email_and_password(client, auth):
+    created = client.post(
+        "/api/users",
+        headers=auth,
+        json={
+            "username": "tech1",
+            "email": "tech1@example.test",
+            "password": "oldpass12",
+            "full_name": "Tech One",
+            "role": "engineer",
+        },
+    )
+    assert created.status_code == 201, created.text
+    uid = created.json()["id"]
+    patched = client.patch(
+        f"/api/users/{uid}",
+        headers=auth,
+        json={"email": "tech1.new@example.test", "password": "newpass12", "username": "tech1b", "full_name": "Tech 1"},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["email"] == "tech1.new@example.test"
+    assert patched.json()["username"] == "tech1b"
+    assert patched.json()["full_name"] == "Tech 1"
+    old = client.post("/api/auth/login", json={"username": "tech1b", "password": "oldpass12"})
+    assert old.status_code == 401
+    new = client.post("/api/auth/login", json={"username": "tech1b", "password": "newpass12"})
+    assert new.status_code == 200, new.text
+
+
+def test_import_preview_mapping_and_rbi_sheet(client, auth):
+    from openpyxl import Workbook
+
+    src = client.post("/api/projects", headers=auth, json={"name": "Export site", "customer": "Acme"})
+    src_id = src.json()["id"]
+    client.post(
+        f"/api/projects/{src_id}/devices",
+        headers=auth,
+        json={"name": "core-sw", "vendor": "Cisco", "model": "Catalyst 9300", "serial": "SN-RBI", "device_type": "switch"},
+    )
+    exported = client.get(f"/api/projects/{src_id}/export.xlsx", headers=auth)
+    assert exported.status_code == 200
+
+    preview = client.post(
+        "/api/imports/preview",
+        headers=auth,
+        files={
+            "file": (
+                "rbi.xlsx",
+                exported.content,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    sheet_names = [s["name"] for s in body["sheets"]]
+    assert "Cover" in sheet_names
+    assert "Devices" in sheet_names
+    assert body["suggested_sheet"] == "Devices"
+    devices_sheet = next(s for s in body["sheets"] if s["name"] == "Devices")
+    assert "name" in devices_sheet["mapped_fields"]
+    assert devices_sheet["record_count"] >= 1
+
+    dest = client.post("/api/projects", headers=auth, json={"name": "Import dest"})
+    dest_id = dest.json()["id"]
+    imported = client.post(
+        f"/api/projects/{dest_id}/import",
+        headers=auth,
+        files={
+            "file": (
+                "rbi.xlsx",
+                exported.content,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert imported.status_code == 200, imported.text
+    summary = imported.json()
+    assert summary["sheet"] == "Devices"
+    assert summary["created"] >= 1
+    listed = client.get(f"/api/projects/{dest_id}/devices", headers=auth).json()
+    assert any(d["serial"] == "SN-RBI" for d in listed)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Gear"
+    ws["A1"] = "Name"
+    ws["B1"] = "sw-a"
+    ws["C1"] = "sw-b"
+    ws["A2"] = "Manufacturer"
+    ws["B2"] = "Juniper"
+    ws["C2"] = "Dell"
+    ws["A3"] = "Model"
+    ws["B3"] = "EX4400"
+    ws["C3"] = "PowerEdge R750"
+    ws["A4"] = "Serial"
+    ws["B4"] = "SN-COL-A"
+    ws["C4"] = "SN-COL-B"
+    buf = BytesIO()
+    wb.save(buf)
+    xlsx_bytes = buf.getvalue()
+
+    col_preview = client.post(
+        "/api/imports/preview",
+        headers=auth,
+        files={
+            "file": (
+                "cols.xlsx",
+                xlsx_bytes,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert col_preview.status_code == 200, col_preview.text
+    col_body = col_preview.json()
+    assert col_body["sheets"][0]["orientation"] == "columns"
+    assert col_body["sheets"][0]["record_count"] == 2
+
+    dest2 = client.post("/api/projects", headers=auth, json={"name": "Column dest"})
+    dest2_id = dest2.json()["id"]
+    mapped = client.post(
+        f"/api/projects/{dest2_id}/import",
+        headers=auth,
+        data={
+            "sheet": "Gear",
+            "orientation": "columns",
+            "mapping": '{"name": 0, "vendor": 1, "model": 2, "serial": 3}',
+        },
+        files={
+            "file": (
+                "cols.xlsx",
+                xlsx_bytes,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert mapped.status_code == 200, mapped.text
+    assert mapped.json()["created"] >= 2
+    rows = client.get(f"/api/projects/{dest2_id}/devices", headers=auth).json()
+    serials = {d["serial"] for d in rows}
+    assert "SN-COL-A" in serials
+    assert "SN-COL-B" in serials
+    assert any(d["vendor"] == "Juniper" and d["model"] == "EX4400" for d in rows)

@@ -367,3 +367,16 @@ class AppBackup(Base):
     status: Mapped[str] = mapped_column(String(32), default="ok")
     detail: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CatalogEntry(Base):
+    """Custom vendor / model / type / function values from Other… or import."""
+
+    __tablename__ = "catalog_entries"
+    __table_args__ = (UniqueConstraint("kind", "parent", "value", name="uq_catalog_entry"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), index=True)  # vendor, model, device_type, function
+    value: Mapped[str] = mapped_column(String(255))
+    parent: Mapped[str] = mapped_column(String(128), default="")  # vendor name when kind=model
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

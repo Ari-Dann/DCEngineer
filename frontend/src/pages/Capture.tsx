@@ -3,6 +3,7 @@ import { Device, Project, Rack, enqueue, projects, uploadPhotos } from "../api";
 import { DeviceEditorModal, DeviceFields, emptyDraft, payloadFromDraft } from "../components/DeviceEditor";
 import LocatePanel from "../components/LocatePanel";
 import type { DeviceDraft } from "../components/DeviceEditor";
+import { learnCatalog } from "../catalog";
 
 export default function Capture() {
   const [plist, setPlist] = useState<Project[]>([]);
@@ -16,6 +17,7 @@ export default function Capture() {
   const [draft, setDraft] = useState<DeviceDraft>(emptyDraft());
   const [editing, setEditing] = useState<Device | null>(null);
   const [busy, setBusy] = useState(false);
+  const [catalogNonce, setCatalogNonce] = useState(0);
 
   useEffect(() => {
     projects.list().then((rows) => {
@@ -67,6 +69,13 @@ export default function Capture() {
       if (photos.length) {
         await uploadPhotos("device", created.id, photos, draft.restricted);
       }
+      await learnCatalog({
+        vendor: created.vendor,
+        model: created.model,
+        device_type: created.device_type,
+        function: created.function,
+      });
+      setCatalogNonce((n) => n + 1);
       setDraft({ ...emptyDraft(rid), device_type: draft.device_type, vendor: draft.vendor, fan_orientation: draft.fan_orientation });
       setPhotos([]);
       setMsg(`Saved ${created.name}. Ready for the next device.`);
@@ -123,6 +132,7 @@ export default function Capture() {
           showLocation={false}
           pendingPhotos={photos}
           onPendingPhotos={setPhotos}
+          catalogNonce={catalogNonce}
         />
         <button className="btn primary block" disabled={busy}>
           {busy ? "Saving…" : "Save & next"}

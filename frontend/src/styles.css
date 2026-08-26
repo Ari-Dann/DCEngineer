@@ -217,6 +217,21 @@ tr.clickable { cursor: pointer; }
   border-radius: 16px;
   padding: 16px;
 }
+.sheet.wide { width: min(960px, 100%); }
+.sheet select { min-height: 40px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: inherit; width: 100%; }
+.combo { position: relative; }
+.combo-list {
+  position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 12;
+  max-height: 240px; overflow: auto;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.35);
+}
+.combo-list button {
+  display: block; width: 100%; text-align: left; min-height: 40px;
+  padding: 8px 12px; border: 0; background: transparent; color: inherit; cursor: pointer;
+}
+.combo-list button:hover, .combo-list button:focus { background: var(--bg-hover); }
+.combo-list .combo-add { color: var(--accent-2); font-weight: 650; }
 .camera-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
 .viewfinder {
   position: relative;

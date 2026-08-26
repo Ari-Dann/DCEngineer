@@ -118,12 +118,21 @@ def update_user(user_id: int, body: UserUpdate, admin: User = Depends(AdminUser)
     if not user:
         raise HTTPException(404, "User not found")
     data = body.model_dump(exclude_unset=True)
-    if "password" in data and data["password"]:
-        user.hashed_password = hash_password(data.pop("password"))
-    else:
-        data.pop("password", None)
+    password = data.pop("password", None)
+    if password:
+        if len(password) < 8:
+            raise HTTPException(400, "Password must be at least 8 characters")
+        user.hashed_password = hash_password(password)
     if data.get("role") and data["role"] not in ROLES:
         raise HTTPException(400, f"role must be one of {ROLES}")
+    if data.get("username"):
+        clash = db.query(User).filter(User.username == data["username"], User.id != user_id).first()
+        if clash:
+            raise HTTPException(409, "Username already exists")
+    if data.get("email"):
+        clash = db.query(User).filter(User.email == data["email"], User.id != user_id).first()
+        if clash:
+            raise HTTPException(409, "Email already exists")
     for key, value in data.items():
         setattr(user, key, value)
     audit(db, admin.id, "update", "user", user.id)

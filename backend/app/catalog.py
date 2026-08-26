@@ -217,12 +217,161 @@ VENDORS: dict[str, list[str]] = {
 
 RACK_HEIGHT_PRESETS = [42, 45, 47, 48, 52, 58]
 
+SKIP_VALUES = {"", "other", "n/a", "na", "none", "unknown", "-", "—"}
 
-def catalog_payload() -> dict:
+
+def _clean(value: str | None) -> str:
+    return (value or "").strip()
+
+
+def _is_custom(value: str) -> bool:
+    return bool(value) and value.strip().lower() not in SKIP_VALUES
+
+
+def _add_vendor(vendors: dict[str, list[str]], name: str) -> str:
+    for existing in vendors:
+        if existing.lower() == name.lower():
+            return existing
+    vendors[name] = ["Other"]
+    return name
+
+
+def _add_model(vendors: dict[str, list[str]], vendor: str, model: str) -> None:
+    key = _add_vendor(vendors, vendor)
+    models = vendors[key]
+    if any(m.lower() == model.lower() for m in models):
+        return
+    if models and models[-1].lower() == "other":
+        models.insert(-1, model)
+    else:
+        models.append(model)
+
+
+def _add_unique(items: list[str], value: str, *, keep_other_last: bool = True) -> None:
+    if any(i.lower() == value.lower() for i in items):
+        return
+    if keep_other_last and items and items[-1].lower() == "other":
+        items.insert(-1, value)
+    else:
+        items.append(value)
+
+
+def learn_values(
+    db,
+    *,
+    vendor: str = "",
+    model: str = "",
+    device_type: str = "",
+    function: str = "",
+) -> None:
+    """Persist custom Other… values so they appear in future dropdowns."""
+    from app.models import CatalogEntry
+
+    vendor = _clean(vendor)
+    model = _clean(model)
+    device_type = _clean(device_type)
+    function = _clean(function)
+
+    def has_static_vendor(name: str) -> bool:
+        return any(existing.lower() == name.lower() for existing in VENDORS)
+
+    def has_static_model(parent: str, name: str) -> bool:
+        for existing, models in VENDORS.items():
+            if existing.lower() == parent.lower() and any(m.lower() == name.lower() for m in models):
+                return True
+        return False
+
+    def upsert(kind: str, value: str, parent: str = "") -> None:
+        if not _is_custom(value):
+            return
+        parent = parent.strip()
+        if kind == "vendor" and has_static_vendor(value):
+            return
+        if kind == "model" and has_static_model(parent, value):
+            return
+        if kind == "device_type" and value.lower() in {t.lower() for t in DEVICE_TYPES}:
+            return
+        existing = db.query(CatalogEntry).filter(CatalogEntry.kind == kind).all()
+        for row in existing:
+            if row.value.lower() == value.lower() and row.parent.lower() == parent.lower():
+                return
+        db.add(CatalogEntry(kind=kind, value=value, parent=parent))
+        db.flush()
+
+    if _is_custom(vendor):
+        upsert("vendor", vendor)
+        if _is_custom(model):
+            upsert("model", model, vendor)
+    if _is_custom(device_type):
+        upsert("device_type", device_type)
+    if _is_custom(function):
+        upsert("function", function)
+
+
+def catalog_payload(db=None) -> dict:
+    vendors: dict[str, list[str]] = {name: list(models) for name, models in VENDORS.items()}
+    device_types = list(DEVICE_TYPES)
+    functions: list[str] = []
+
+    if db is not None:
+        from app.models import CatalogEntry, Device
+
+        for entry in db.query(CatalogEntry).order_by(CatalogEntry.value).all():
+            if entry.kind == "vendor":
+                _add_vendor(vendors, entry.value)
+            elif entry.kind == "model" and entry.parent:
+                _add_model(vendors, entry.parent, entry.value)
+            elif entry.kind == "device_type":
+                _add_unique(device_types, entry.value)
+            elif entry.kind == "function":
+                _add_unique(functions, entry.value, keep_other_last=False)
+
+        for row in db.query(Device.vendor, Device.model, Device.device_type, Device.function).all():
+            vendor = _clean(row.vendor)
+            model = _clean(row.model)
+            if _is_custom(vendor):
+                _add_vendor(vendors, vendor)
+                if _is_custom(model):
+                    _add_model(vendors, vendor, model)
+            dtype = _clean(row.device_type)
+            if _is_custom(dtype):
+                _add_unique(device_types, dtype)
+            func = _clean(row.function)
+            if _is_custom(func):
+                _add_unique(functions, func, keep_other_last=False)
+
+    other = vendors.pop("Other", ["Other"])
+    ordered = [{"name": name, "models": models} for name, models in vendors.items()]
+    ordered.append({"name": "Other", "models": other if other else ["Other"]})
+
     return {
-        "device_types": DEVICE_TYPES,
+        "device_types": device_types,
         "fan_orientations": FAN_ORIENTATIONS,
-        "vendors": [{"name": name, "models": models} for name, models in VENDORS.items()],
+        "vendors": ordered,
+        "functions": functions,
         "rack_height_presets": RACK_HEIGHT_PRESETS,
         "other_label": "Other",
+        "fields": IMPORT_FIELDS,
     }
+
+
+# Shared with the importer so mapping UI and capture dropdowns stay aligned.
+IMPORT_FIELDS = [
+    {"id": "name", "label": "Device name"},
+    {"id": "hostname", "label": "Hostname"},
+    {"id": "vendor", "label": "Vendor / manufacturer"},
+    {"id": "model", "label": "Model"},
+    {"id": "serial", "label": "Serial"},
+    {"id": "asset_tag", "label": "Asset tag"},
+    {"id": "rack", "label": "Rack"},
+    {"id": "ru_start", "label": "RU start"},
+    {"id": "ru_end", "label": "RU end"},
+    {"id": "ru_height", "label": "Height (U)"},
+    {"id": "device_type", "label": "Type"},
+    {"id": "function", "label": "Function / role"},
+    {"id": "management_ip", "label": "Management IP"},
+    {"id": "notes", "label": "Notes"},
+    {"id": "eol_date", "label": "EOL date"},
+    {"id": "eos_date", "label": "EOS date"},
+    {"id": "fan_orientation", "label": "Fan orientation"},
+]

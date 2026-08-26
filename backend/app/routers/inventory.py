@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -27,7 +27,8 @@ from app.models import (
     User,
     WorkOrder,
 )
-from app.importer import import_devices
+from app.catalog import learn_values
+from app.importer import import_devices, preview_import
 from app.rbi_export import eol_status
 from app.schemas import (
     AreaIn,
@@ -326,10 +327,37 @@ def search_inventory(
     return {"query": q, "count": len(hits), "devices": hits}
 
 
+@ops_router.post("/imports/preview")
+async def preview_inventory_import(
+    file: UploadFile = File(...),
+    sheet: Optional[str] = Form(None),
+    orientation: Optional[str] = Form(None),
+    header_index: Optional[int] = Form(None),
+    _: User = Depends(get_current_user),
+):
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Empty file")
+    try:
+        return preview_import(
+            file.filename or "upload.csv",
+            data,
+            sheet=sheet or None,
+            orientation=orientation or None,
+            header_index=header_index,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @projects_router.post("/{project_id}/import")
 async def import_inventory(
     project_id: int,
     file: UploadFile = File(...),
+    sheet: Optional[str] = Form(None),
+    orientation: Optional[str] = Form(None),
+    header_index: Optional[int] = Form(None),
+    mapping: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     user: User = Depends(WriteUser),
 ):
@@ -338,7 +366,17 @@ async def import_inventory(
     if not data:
         raise HTTPException(400, "Empty file")
     try:
-        result = import_devices(db, project_id, file.filename or "upload.csv", data, user.id)
+        result = import_devices(
+            db,
+            project_id,
+            file.filename or "upload.csv",
+            data,
+            user.id,
+            sheet=sheet or None,
+            orientation=orientation or None,
+            header_index=header_index,
+            mapping=mapping,
+        )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return result
@@ -351,6 +389,13 @@ def create_device(project_id: int, body: DeviceIn, db: Session = Depends(get_db)
     db.add(device)
     db.flush()
     _ensure_rack_fits(db, device.rack_id, device.ru_end)
+    learn_values(
+        db,
+        vendor=device.vendor,
+        model=device.model,
+        device_type=device.device_type,
+        function=device.function,
+    )
     db.commit()
     db.refresh(device)
     return device_out(device)
@@ -365,6 +410,13 @@ def update_device(
         raise HTTPException(404, "Device not found")
     _apply(device, body.model_dump(exclude_unset=True))
     _ensure_rack_fits(db, device.rack_id, device.ru_end)
+    learn_values(
+        db,
+        vendor=device.vendor,
+        model=device.model,
+        device_type=device.device_type,
+        function=device.function,
+    )
     db.commit()
     db.refresh(device)
     return device_out(device)
