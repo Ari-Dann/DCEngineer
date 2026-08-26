@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   Area,
   Cable,
@@ -13,6 +13,7 @@ import {
   projects,
 } from "../api";
 import { DeviceEditorModal, RackHeightField } from "../components/DeviceEditor";
+import ImportWizard from "../components/ImportWizard";
 import LocatePanel from "../components/LocatePanel";
 import PhotoGallery from "../components/PhotoGallery";
 
@@ -22,7 +23,9 @@ type Tab = (typeof TABS)[number];
 export default function Project() {
   const { id } = useParams();
   const pid = Number(id);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [params, setParams] = useSearchParams();
+  const tabParam = params.get("tab");
+  const tab: Tab = TABS.includes(tabParam as Tab) ? (tabParam as Tab) : "overview";
   const [project, setProject] = useState<ProjectT | null>(null);
   const [areas, setAreas] = useState<Area[]>([]);
   const [racks, setRacks] = useState<Rack[]>([]);
@@ -37,6 +40,7 @@ export default function Project() {
   const [rackRow, setRackRow] = useState("");
   const [filter, setFilter] = useState("");
   const [importMsg, setImportMsg] = useState("");
+  const [importOpen, setImportOpen] = useState(false);
   const [editing, setEditing] = useState<Device | null>(null);
   const [openArea, setOpenArea] = useState<number | null>(null);
   const [hand, setHand] = useState({
@@ -83,20 +87,30 @@ export default function Project() {
     load();
   }
 
-  async function onImport(file: File | undefined) {
-    if (!file) return;
-    setError("");
-    setImportMsg("");
-    try {
-      const result: ImportResult = await projects.importFile(pid, file);
+  function setTab(next: Tab) {
+    const nextParams = new URLSearchParams(params);
+    if (next === "overview") nextParams.delete("tab");
+    else nextParams.set("tab", next);
+    setParams(nextParams, { replace: true });
+  }
+
+  async function onImported(_target: number, result: ImportResult) {
+    setImportOpen(false);
+    setTab("devices");
+    const placed = result.created + result.updated;
+    const sheet = result.sheet ? ` from “${result.sheet}”` : "";
+    const names = result.names?.length ? ` First records: ${result.names.slice(0, 8).join(", ")}.` : "";
+    if (placed === 0) {
       setImportMsg(
-        `Imported ${result.rows} rows: ${result.created} created, ${result.updated} updated, ${result.racks_created} racks added, ${result.skipped} skipped.`,
+        `Read ${result.rows} row${result.rows === 1 ? "" : "s"}${sheet} but none became devices (${result.skipped} skipped). Check the column mapping.`,
       );
-      if (result.errors.length) setError(result.errors.join(" · "));
-      load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Import failed");
+    } else {
+      setImportMsg(
+        `Imported ${placed} device${placed === 1 ? "" : "s"} into this project${sheet}: ${result.created} created, ${result.updated} updated, ${result.racks_created} racks added, ${result.skipped} skipped.${names}`,
+      );
     }
+    if (result.errors.length) setError(result.errors.join(" · "));
+    load();
   }
 
   if (!project) return <div className="page">{error || "Loading…"}</div>;
@@ -263,21 +277,12 @@ export default function Project() {
                 placeholder="name, serial, hostname, vendor…"
               />
             </label>
-            <label className="field">
-              <span>Import CSV or XLSX</span>
-              <input
-                type="file"
-                accept=".csv,.xlsx,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
-                onChange={(e) => {
-                  onImport(e.target.files?.[0]);
-                  e.target.value = "";
-                }}
-              />
-            </label>
+            <button type="button" className="btn primary" onClick={() => setImportOpen(true)}>
+              Import CSV / XLSX
+            </button>
             <p className="muted">
-              Columns (any order): name, hostname, vendor, model, serial, asset tag, rack, RU start, RU end or height, type,
-              function, management IP, notes, EOL, EOS. Matching serials are updated. Missing racks are created. Legacy .xls
-              is not supported — save as .xlsx or CSV.
+              Imports into this project. You choose the sheet and map columns or rows onto device fields. Unlocated
+              devices (no rack) show here and under Locate.
             </p>
           </div>
           <div className="table-wrap">
@@ -487,6 +492,14 @@ export default function Project() {
         </div>
       )}
 
+      {importOpen && (
+        <ImportWizard
+          projectList={project ? [project] : []}
+          projectId={pid}
+          onClose={() => setImportOpen(false)}
+          onImported={onImported}
+        />
+      )}
       {editing && (
         <DeviceEditorModal
           projectId={pid}

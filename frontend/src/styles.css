@@ -217,6 +217,8 @@ tr.clickable { cursor: pointer; }
   border-radius: 16px;
   padding: 16px;
 }
+.sheet.wide { width: min(960px, 100%); }
+.sheet select { min-height: 40px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: inherit; width: 100%; }
 .camera-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
 .viewfinder {
   position: relative;

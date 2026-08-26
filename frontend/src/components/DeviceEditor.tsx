@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Catalog, OTHER, loadCatalog } from "../catalog";
+import { Catalog, OTHER, learnCatalog, loadCatalog } from "../catalog";
 import { Device, Rack, projects } from "../api";
 import CameraModal from "./CameraModal";
 import PhotoGallery from "./PhotoGallery";
@@ -118,14 +118,19 @@ function Combo({
   options,
   value,
   onChange,
+  onCommit,
 }: {
   label: string;
   options: string[];
   value: string;
   onChange: (v: string) => void;
+  onCommit?: (v: string) => void;
 }) {
-  const unique = Array.from(new Set(options.filter((o) => o && o !== OTHER)));
-  const known = unique.includes(value);
+  const unique = Array.from(new Set(options.filter((o) => o && o.toLowerCase() !== OTHER.toLowerCase())));
+  if (value && value.toLowerCase() !== OTHER.toLowerCase() && !unique.some((o) => o.toLowerCase() === value.toLowerCase())) {
+    unique.push(value);
+  }
+  const known = unique.some((o) => o === value);
   const selectValue = !value ? "" : known ? value : OTHER;
   return (
     <label className="field">
@@ -151,6 +156,10 @@ function Combo({
           placeholder="Type a custom / Other value"
           value={value === OTHER ? "" : value}
           onChange={(e) => onChange(e.target.value)}
+          onBlur={() => {
+            const custom = (value === OTHER ? "" : value).trim();
+            if (custom) onCommit?.(custom);
+          }}
           autoComplete="off"
         />
       )}
@@ -216,6 +225,7 @@ type Props = {
   onPendingPhotos?: (files: File[]) => void;
   savedDeviceId?: number;
   projectId?: number;
+  catalogNonce?: number;
 };
 
 export function DeviceFields({
@@ -227,12 +237,13 @@ export function DeviceFields({
   onPendingPhotos,
   savedDeviceId,
   projectId,
+  catalogNonce = 0,
 }: Props) {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [cam, setCam] = useState<"scan" | "photo" | null>(null);
   useEffect(() => {
-    loadCatalog().then(setCatalog);
-  }, []);
+    loadCatalog(catalogNonce > 0).then(setCatalog);
+  }, [catalogNonce]);
 
   const vendorNames = useMemo(() => catalog?.vendors.map((v) => v.name) ?? [OTHER], [catalog]);
   const models = useMemo(() => {
@@ -240,6 +251,11 @@ export function DeviceFields({
     return entry?.models ?? [OTHER];
   }, [catalog, value.vendor]);
   const set = (patch: Partial<DeviceDraft>) => onChange({ ...value, ...patch });
+
+  async function persist(body: { vendor?: string; model?: string; device_type?: string; function?: string }) {
+    const next = await learnCatalog(body);
+    setCatalog(next);
+  }
 
   return (
     <>
@@ -253,8 +269,15 @@ export function DeviceFields({
           options={vendorNames}
           value={value.vendor}
           onChange={(vendor) => set({ vendor, model: "" })}
+          onCommit={(vendor) => persist({ vendor })}
         />
-        <Combo label="Model" options={models} value={value.model} onChange={(model) => set({ model })} />
+        <Combo
+          label="Model"
+          options={models}
+          value={value.model}
+          onChange={(model) => set({ model })}
+          onCommit={(model) => persist({ vendor: value.vendor, model })}
+        />
       </div>
       <label className="field">
         <span>Serial</span>
@@ -281,14 +304,13 @@ export function DeviceFields({
         </label>
       </div>
       <div className="row three">
-        <label className="field">
-          <span>Type</span>
-          <select value={value.device_type} onChange={(e) => set({ device_type: e.target.value })}>
-            {(catalog?.device_types ?? ["server", "switch", "router", "firewall", "other"]).map((t) => (
-              <option key={t}>{t}</option>
-            ))}
-          </select>
-        </label>
+        <Combo
+          label="Type"
+          options={catalog?.device_types ?? ["server", "switch", "router", "firewall", "other"]}
+          value={value.device_type}
+          onChange={(device_type) => set({ device_type })}
+          onCommit={(device_type) => persist({ device_type })}
+        />
         <label className="field">
           <span>RU start (from bottom)</span>
           <input
@@ -329,10 +351,21 @@ export function DeviceFields({
       <label className="field">
         <span>Function / logical role</span>
         <input
+          list="dce-functions"
           value={value.function}
           onChange={(e) => set({ function: e.target.value })}
+          onBlur={() => {
+            const fn = value.function.trim();
+            if (fn) persist({ function: fn });
+          }}
           placeholder="core switch, hypervisor, WAN edge…"
+          autoComplete="off"
         />
+        <datalist id="dce-functions">
+          {(catalog?.functions ?? []).map((f) => (
+            <option key={f} value={f} />
+          ))}
+        </datalist>
       </label>
       <div className="row">
         <label className="field">

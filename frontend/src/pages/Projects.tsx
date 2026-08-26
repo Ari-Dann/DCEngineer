@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { Project, projects } from "../api";
+import { Link, useNavigate } from "react-router-dom";
+import { ImportResult, Project, projects } from "../api";
+import ImportWizard from "../components/ImportWizard";
 
 const empty = {
   name: "",
@@ -25,8 +26,10 @@ const empty = {
 };
 
 export default function Projects() {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<Project[]>([]);
   const [open, setOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [form, setForm] = useState(empty);
   const [error, setError] = useState("");
 
@@ -56,9 +59,14 @@ export default function Projects() {
           <h1>Sites & RBI projects</h1>
           <p>Phase 1 workbook shell through Phase 4 delivery.</p>
         </div>
-        <button className="btn primary" onClick={() => setOpen((v) => !v)}>
-          {open ? "Close" : "New project"}
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn" onClick={() => setImportOpen(true)} disabled={rows.length === 0}>
+            Import inventory
+          </button>
+          <button className="btn primary" onClick={() => setOpen((v) => !v)}>
+            {open ? "Close" : "New project"}
+          </button>
+        </div>
       </div>
       {error && <div className="error">{error}</div>}
       {open && (
@@ -111,6 +119,18 @@ export default function Projects() {
         ))}
         {rows.length === 0 && <div className="card muted">No projects yet. Create the RBI workbook shell to begin Phase 1.</div>}
       </div>
+      {importOpen && (
+        <ImportWizard
+          projectList={rows}
+          onClose={() => setImportOpen(false)}
+          onImported={(pid: number, result: ImportResult) => {
+            setImportOpen(false);
+            const qs = new URLSearchParams({ tab: "devices" });
+            if (result.created + result.updated === 0) qs.set("import", "empty");
+            navigate(`/projects/${pid}?${qs.toString()}`);
+          }}
+        />
+      )}
     </div>
   );
 }

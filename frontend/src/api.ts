@@ -160,9 +160,21 @@ export const projects = {
     const qs = params.toString();
     return api<SearchResult>(`/api/projects/${id}/search${qs ? `?${qs}` : ""}`);
   },
-  importFile: (id: number, file: File) => {
+  previewImport: (file: File, opts?: { sheet?: string; orientation?: string; header_index?: number }) => {
     const fd = new FormData();
     fd.append("file", file);
+    if (opts?.sheet) fd.append("sheet", opts.sheet);
+    if (opts?.orientation) fd.append("orientation", opts.orientation);
+    if (opts?.header_index != null) fd.append("header_index", String(opts.header_index));
+    return api<ImportPreview>("/api/imports/preview", { method: "POST", body: fd });
+  },
+  importFile: (id: number, file: File, opts?: ImportOptions) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    if (opts?.sheet) fd.append("sheet", opts.sheet);
+    if (opts?.orientation) fd.append("orientation", opts.orientation);
+    if (opts?.header_index != null) fd.append("header_index", String(opts.header_index));
+    if (opts?.mapping) fd.append("mapping", JSON.stringify(opts.mapping));
     return api<ImportResult>(`/api/projects/${id}/import`, { method: "POST", body: fd });
   },
   pdus: (pid: number, rid: number) => api<PDU[]>(`/api/projects/${pid}/racks/${rid}/pdus`),
@@ -209,6 +221,10 @@ export const ops = {
   users: () => api<User[]>("/api/users"),
   addUser: (body: { username: string; email: string; password: string; full_name?: string; role: Role }) =>
     api<User>("/api/users", { method: "POST", body: JSON.stringify(body) }),
+  updateUser: (
+    id: number,
+    body: { username?: string; email?: string; password?: string; full_name?: string; role?: Role; is_active?: boolean },
+  ) => api<User>(`/api/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   me: () => api<User>("/api/auth/me"),
 };
 
@@ -244,6 +260,34 @@ export type ImportResult = {
   skipped: number;
   rows: number;
   errors: string[];
+  names?: string[];
+  sheet?: string;
+  orientation?: string;
+};
+
+export type ImportField = { id: string; label: string };
+export type ImportHeader = { index: number; label: string; suggested: string };
+export type ImportPreviewSheet = {
+  name: string;
+  orientation: "rows" | "columns";
+  header_index: number;
+  headers: ImportHeader[];
+  raw_sample: string[][];
+  sample_records: Record<string, string>[];
+  record_count: number;
+  mapped_fields: string[];
+};
+export type ImportPreview = {
+  filename: string;
+  sheets: ImportPreviewSheet[];
+  suggested_sheet: string;
+  fields: ImportField[];
+};
+export type ImportOptions = {
+  sheet?: string;
+  orientation?: "rows" | "columns";
+  header_index?: number;
+  mapping?: Record<string, number>;
 };
 
 async function authFetch(path: string, init: RequestInit = {}) {
