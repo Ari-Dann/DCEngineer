@@ -445,7 +445,7 @@ export function DeviceFields({
         <>
           <span className="muted">LED / screen color</span>
           <div className="choice compact">
-            {(catalog?.indicator_colors ?? []).map((option) => (
+            {(catalog?.indicator_colors ?? []).filter((option) => option.id !== "none").map((option) => (
               <button
                 type="button"
                 key={option.id}
@@ -541,12 +541,14 @@ export function DeviceEditorModal({
   racks,
   onClose,
   onSaved,
+  onRelocate,
 }: {
   projectId: number;
   device: Device;
   racks: Rack[];
   onClose: () => void;
   onSaved: (d: Device) => void;
+  onRelocate?: (mode: "copy" | "move") => void;
 }) {
   const [draft, setDraft] = useState(draftFromDevice(device));
   const [error, setError] = useState("");
@@ -572,9 +574,21 @@ export function DeviceEditorModal({
       <form className="sheet" onSubmit={onSubmit}>
         <div className="camera-head">
           <h2>Edit {device.name}</h2>
-          <button type="button" className="btn" onClick={onClose}>
-            Close
-          </button>
+          <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {onRelocate && (
+              <>
+                <button type="button" className="btn" onClick={() => onRelocate("copy")}>
+                  Copy
+                </button>
+                <button type="button" className="btn" onClick={() => onRelocate("move")}>
+                  Move
+                </button>
+              </>
+            )}
+            <button type="button" className="btn" onClick={onClose}>
+              Close
+            </button>
+          </span>
         </div>
         {error && <div className="error">{error}</div>}
         <DeviceFields value={draft} onChange={setDraft} racks={racks} savedDeviceId={device.id} projectId={projectId} />

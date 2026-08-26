@@ -11,6 +11,7 @@ import {
   Project as ProjectT,
   Rack,
   downloadAuth,
+  indicatorLabel,
   layoutPath,
   projects,
 } from "../api";
@@ -18,7 +19,7 @@ import { DeviceEditorModal, RackHeightField } from "../components/DeviceEditor";
 import ImportWizard from "../components/ImportWizard";
 import LocatePanel from "../components/LocatePanel";
 import PhotoGallery from "../components/PhotoGallery";
-import RelocateDialog from "../components/RelocateDialog";
+import RelocateDialog, { RelocateKind } from "../components/RelocateDialog";
 
 const TABS = ["overview", "areas", "rows", "racks", "devices", "locate", "cables", "checklists", "handoffs", "lifecycle"] as const;
 type Tab = (typeof TABS)[number];
@@ -53,9 +54,7 @@ export default function Project() {
   const [editing, setEditing] = useState<Device | null>(null);
   const [openArea, setOpenArea] = useState<number | null>(null);
   const [editingArea, setEditingArea] = useState<Area | null>(null);
-  const [relocate, setRelocate] = useState<{ kind: "area" | "row" | "rack"; id: number; mode: "copy" | "move" } | null>(
-    null,
-  );
+  const [relocate, setRelocate] = useState<{ kind: RelocateKind; id: number; mode: "copy" | "move" } | null>(null);
   const [hand, setHand] = useState({
     handoff_date: new Date().toISOString().slice(0, 10),
     from_name: "",
@@ -542,7 +541,9 @@ export default function Project() {
                   <th>Serial</th>
                   <th>RU</th>
                   <th>Fan</th>
+                  <th>LED / screen</th>
                   <th>EOL</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -568,8 +569,27 @@ export default function Project() {
                         {d.ru_start || "—"}–{d.ru_end || "—"}
                       </td>
                       <td>{d.fan_orientation}</td>
+                      <td>{indicatorLabel(d.indicator_type, d.indicator_color)}</td>
                       <td>
                         <span className={`badge ${d.eol_status || "unknown"}`}>{d.eol_status || "unknown"}</span>
+                      </td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            className="btn"
+                            onClick={() => setRelocate({ kind: "device", id: d.id, mode: "copy" })}
+                          >
+                            Copy
+                          </button>
+                          <button
+                            type="button"
+                            className="btn"
+                            onClick={() => setRelocate({ kind: "device", id: d.id, mode: "move" })}
+                          >
+                            Move
+                          </button>
+                        </span>
                       </td>
                     </tr>
                   );
@@ -763,6 +783,10 @@ export default function Project() {
           onSaved={() => {
             setEditing(null);
             load();
+          }}
+          onRelocate={(mode) => {
+            setRelocate({ kind: "device", id: editing.id, mode });
+            setEditing(null);
           }}
         />
       )}

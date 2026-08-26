@@ -129,6 +129,15 @@ def _target_row(db: Session, project_id: int, row_id: Optional[int]) -> AisleRow
     return row
 
 
+def _target_rack(db: Session, project_id: int, rack_id: Optional[int]) -> Rack | None:
+    if not rack_id:
+        return None
+    rack = db.get(Rack, rack_id)
+    if not rack or rack.project_id != project_id:
+        raise HTTPException(404, "Rack not found")
+    return rack
+
+
 def apply_relocate(db: Session, kind: str, entity, body: RelocateIn, copy: bool):
     target_project_id = body.target_project_id
     include_children = body.include_children
@@ -221,15 +230,30 @@ def apply_relocate(db: Session, kind: str, entity, body: RelocateIn, copy: bool)
                 for device in db.query(Device).filter(Device.rack_id == entity.id).all():
                     db.add(_clone(device, project_id=target_project_id, rack_id=clone.id))
             return clone
+        orig_row_id = entity.row_id
         entity.project_id = target_project_id
         entity.area_id = dest_area_id
         if dest_row:
             entity.row_id = dest_row.id
             entity.row_label = dest_row.name
         else:
-            entity.row_id = None
+            current_row = db.get(AisleRow, orig_row_id) if orig_row_id else None
+            if not current_row or current_row.project_id != target_project_id:
+                entity.row_id = None
         if include_devices:
             _move_devices(db, [entity.id], target_project_id)
+        return entity
+
+    if kind == "device":
+        dest_rack = _target_rack(db, target_project_id, body.target_rack_id)
+        dest_rack_id = dest_rack.id if dest_rack else None
+        if copy:
+            clone = _clone(entity, project_id=target_project_id, rack_id=dest_rack_id)
+            db.add(clone)
+            db.flush()
+            return clone
+        entity.project_id = target_project_id
+        entity.rack_id = dest_rack_id
         return entity
 
     raise HTTPException(400, "Unknown relocate kind")

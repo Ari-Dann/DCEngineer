@@ -10,6 +10,7 @@ import {
   payloadFromDraft,
 } from "../components/DeviceEditor";
 import PhotoGallery from "../components/PhotoGallery";
+import RelocateDialog, { RelocateKind } from "../components/RelocateDialog";
 
 export default function RackPage() {
   const { id, rackId } = useParams();
@@ -25,6 +26,7 @@ export default function RackPage() {
   const [photos, setPhotos] = useState<File[]>([]);
   const [pduName, setPduName] = useState("PDU-A");
   const [editing, setEditing] = useState<Device | null>(null);
+  const [relocate, setRelocate] = useState<{ kind: RelocateKind; id: number; mode: "copy" | "move" } | null>(null);
   const [height, setHeight] = useState(42);
 
   async function load() {
@@ -208,6 +210,20 @@ export default function RackPage() {
             setEditing(null);
             load();
           }}
+          onRelocate={(mode) => {
+            setRelocate({ kind: "device", id: editing.id, mode });
+            setEditing(null);
+          }}
+        />
+      )}
+      {relocate && (
+        <RelocateDialog
+          kind={relocate.kind}
+          mode={relocate.mode}
+          projectId={pid}
+          entityId={relocate.id}
+          onClose={() => setRelocate(null)}
+          onDone={load}
         />
       )}
     </div>

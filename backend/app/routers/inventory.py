@@ -123,6 +123,13 @@ def _get_rack(db: Session, project_id: int, rack_id: int) -> Rack:
     return rack
 
 
+def _get_device(db: Session, project_id: int, device_id: int) -> Device:
+    device = db.get(Device, device_id)
+    if not device or device.project_id != project_id:
+        raise HTTPException(404, "Device not found")
+    return device
+
+
 def _relocate(db: Session, kind: str, entity, body: RelocateIn, copy: bool):
     _get_project(db, body.target_project_id)
     result = apply_relocate(db, kind=kind, entity=entity, body=body, copy=copy)
@@ -593,9 +600,7 @@ def create_device(project_id: int, body: DeviceIn, db: Session = Depends(get_db)
 def update_device(
     project_id: int, device_id: int, body: DevicePatch, db: Session = Depends(get_db), _: User = Depends(WriteUser)
 ):
-    device = db.get(Device, device_id)
-    if not device or device.project_id != project_id:
-        raise HTTPException(404, "Device not found")
+    device = _get_device(db, project_id, device_id)
     _apply(device, body.model_dump(exclude_unset=True))
     _ensure_rack_fits(db, device.rack_id, device.ru_end)
     learn_values(
@@ -610,11 +615,23 @@ def update_device(
     return device_out(device)
 
 
+@projects_router.post("/{project_id}/devices/{device_id}/copy", response_model=DeviceOut)
+def copy_device(
+    project_id: int, device_id: int, body: RelocateIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)
+):
+    return device_out(_relocate(db, "device", _get_device(db, project_id, device_id), body, True))
+
+
+@projects_router.post("/{project_id}/devices/{device_id}/move", response_model=DeviceOut)
+def move_device(
+    project_id: int, device_id: int, body: RelocateIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)
+):
+    return device_out(_relocate(db, "device", _get_device(db, project_id, device_id), body, False))
+
+
 @projects_router.delete("/{project_id}/devices/{device_id}")
 def delete_device(project_id: int, device_id: int, db: Session = Depends(get_db), _: User = Depends(WriteUser)):
-    device = db.get(Device, device_id)
-    if not device or device.project_id != project_id:
-        raise HTTPException(404, "Device not found")
+    device = _get_device(db, project_id, device_id)
     db.delete(device)
     db.commit()
     return {"ok": True}

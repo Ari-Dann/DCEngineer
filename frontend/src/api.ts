@@ -167,6 +167,10 @@ export const projects = {
     api<Rack>(`/api/projects/${id}/racks/${rackId}/copy`, { method: "POST", body: JSON.stringify(body) }),
   moveRack: (id: number, rackId: number, body: RelocateBody) =>
     api<Rack>(`/api/projects/${id}/racks/${rackId}/move`, { method: "POST", body: JSON.stringify(body) }),
+  copyDevice: (id: number, deviceId: number, body: RelocateBody) =>
+    api<Device>(`/api/projects/${id}/devices/${deviceId}/copy`, { method: "POST", body: JSON.stringify(body) }),
+  moveDevice: (id: number, deviceId: number, body: RelocateBody) =>
+    api<Device>(`/api/projects/${id}/devices/${deviceId}/move`, { method: "POST", body: JSON.stringify(body) }),
   devices: (id: number, extra = "") => api<Device[]>(`/api/projects/${id}/devices${extra}`),
   getDevice: (pid: number, did: number) => api<Device>(`/api/projects/${pid}/devices/${did}`),
   addDevice: (id: number, body: Partial<Device> & { name: string }) =>
@@ -423,6 +427,7 @@ export type RelocateBody = {
   target_project_id: number;
   target_area_id?: number | null;
   target_row_id?: number | null;
+  target_rack_id?: number | null;
   include_children?: boolean;
   include_devices?: boolean;
 };
@@ -475,6 +480,14 @@ export type Device = {
   notes: string;
   eol_status?: string | null;
 };
+
+export function indicatorLabel(type?: string, color?: string) {
+  const presence = type || "unknown";
+  if (presence === "none") return "none";
+  const tint = color || "unknown";
+  if (!tint || tint === "none" || tint === "unknown") return presence;
+  return `${presence} · ${tint}`;
+}
 
 export type PDU = {
   id: number;

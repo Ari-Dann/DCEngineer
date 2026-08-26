@@ -93,7 +93,14 @@ export default function Capture() {
         function: created.function,
       });
       setCatalogNonce((n) => n + 1);
-      setDraft({ ...emptyDraft(rid), device_type: draft.device_type, vendor: draft.vendor, fan_orientation: draft.fan_orientation });
+      setDraft({
+        ...emptyDraft(rid),
+        device_type: draft.device_type,
+        vendor: draft.vendor,
+        fan_orientation: draft.fan_orientation,
+        indicator_type: draft.indicator_type,
+        indicator_color: draft.indicator_type === "none" ? "none" : draft.indicator_color,
+      });
       setPhotos([]);
       setMsg(`Saved ${created.name}. Ready for the next device.`);
       await loadDevices();
@@ -140,7 +147,7 @@ export default function Capture() {
                 setRid("");
               }}
             >
-              <option value="">All areas</option>
+              <option value="">All areas / unlocated</option>
               {areas.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}
@@ -159,7 +166,7 @@ export default function Capture() {
                 setRid("");
               }}
             >
-              <option value="">All rows</option>
+              <option value="">All rows / unlocated</option>
               {visibleRows.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.name}

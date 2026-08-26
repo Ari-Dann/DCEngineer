@@ -130,6 +130,7 @@ class RelocateIn(BaseModel):
     target_project_id: int
     target_area_id: Optional[int] = None
     target_row_id: Optional[int] = None
+    target_rack_id: Optional[int] = None
     include_children: bool = True
     include_devices: bool = False
 
