@@ -61,6 +61,7 @@ class Project(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     areas: Mapped[list["Area"]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    aisle_rows: Mapped[list["AisleRow"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     racks: Mapped[list["Rack"]] = relationship(back_populates="project", cascade="all, delete-orphan")
 
 
@@ -77,7 +78,25 @@ class Area(Base):
     photography_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
 
     project: Mapped["Project"] = relationship(back_populates="areas")
+    aisle_rows: Mapped[list["AisleRow"]] = relationship(back_populates="area")
     racks: Mapped[list["Rack"]] = relationship(back_populates="area")
+
+
+class AisleRow(Base):
+    """A row / aisle inside an area. Racks belong to a row."""
+
+    __tablename__ = "aisle_rows"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    area_id: Mapped[Optional[int]] = mapped_column(ForeignKey("areas.id", ondelete="SET NULL"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(128), index=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    project: Mapped["Project"] = relationship(back_populates="aisle_rows")
+    area: Mapped[Optional["Area"]] = relationship(back_populates="aisle_rows")
+    racks: Mapped[list["Rack"]] = relationship(back_populates="aisle_row")
 
 
 class Rack(Base):
@@ -86,6 +105,7 @@ class Rack(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     area_id: Mapped[Optional[int]] = mapped_column(ForeignKey("areas.id"), nullable=True, index=True)
+    row_id: Mapped[Optional[int]] = mapped_column(ForeignKey("aisle_rows.id", ondelete="SET NULL"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(128), index=True)
     row_label: Mapped[str] = mapped_column(String(64), default="")
     position: Mapped[str] = mapped_column(String(64), default="")
@@ -96,6 +116,7 @@ class Rack(Base):
 
     project: Mapped["Project"] = relationship(back_populates="racks")
     area: Mapped[Optional["Area"]] = relationship(back_populates="racks")
+    aisle_row: Mapped[Optional["AisleRow"]] = relationship(back_populates="racks")
     devices: Mapped[list["Device"]] = relationship(back_populates="rack", cascade="all, delete-orphan")
     pdus: Mapped[list["PDU"]] = relationship(back_populates="rack", cascade="all, delete-orphan")
 
@@ -119,6 +140,8 @@ class Device(Base):
     restricted: Mapped[bool] = mapped_column(Boolean, default=False)
     restricted_reason: Mapped[str] = mapped_column(String(128), default="")
     fan_orientation: Mapped[str] = mapped_column(String(64), default="unknown")
+    indicator_type: Mapped[str] = mapped_column(String(32), default="unknown")  # none | led | screen | both | unknown
+    indicator_color: Mapped[str] = mapped_column(String(32), default="unknown")
     power_draw_watts: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     management_ip: Mapped[str] = mapped_column(String(64), default="")
     discovered_via: Mapped[str] = mapped_column(String(64), default="physical")

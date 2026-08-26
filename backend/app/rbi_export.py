@@ -12,7 +12,7 @@ from openpyxl.utils import get_column_letter
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import Cable, Device, Handoff, PDU, PDUPort, Project, Rack
+from app.models import Area, Cable, Device, Handoff, PDU, PDUPort, Project, Rack
 
 
 HEADER_FILL = PatternFill("solid", fgColor="1B3A4B")
@@ -105,9 +105,11 @@ def build_rbi_workbook(db: Session, project: Project) -> bytes:
 
     racks = db.query(Rack).filter(Rack.project_id == project.id).order_by(Rack.name).all()
     rack_sheet = wb.create_sheet("Racks")
-    _header(rack_sheet, ["Rack", "Row", "Position", "RU height", "Width in", "Notes"])
+    _header(rack_sheet, ["Rack", "Row", "Area", "Position", "RU height", "Width in", "Notes"])
+    areas = {a.id: a for a in db.query(Area).filter(Area.project_id == project.id).all()}
     for rack in racks:
-        rack_sheet.append([rack.name, rack.row_label, rack.position, rack.ru_height, rack.width_inches, rack.notes])
+        area_name = areas[rack.area_id].name if rack.area_id in areas else ""
+        rack_sheet.append([rack.name, rack.row_label, area_name, rack.position, rack.ru_height, rack.width_inches, rack.notes])
     _autosize(rack_sheet)
 
     elev = wb.create_sheet("Elevations")
@@ -141,6 +143,8 @@ def build_rbi_workbook(db: Session, project: Project) -> bytes:
             "Name",
             "Hostname",
             "Rack",
+            "Row",
+            "Area",
             "Vendor",
             "Model",
             "Serial",
@@ -152,6 +156,8 @@ def build_rbi_workbook(db: Session, project: Project) -> bytes:
             "Restricted",
             "Restriction",
             "Fan orientation",
+            "LED / screen",
+            "LED / screen color",
             "Mgmt IP",
             "Discovered via",
             "Undocumented",
@@ -162,12 +168,15 @@ def build_rbi_workbook(db: Session, project: Project) -> bytes:
         ],
     )
     for dev in devices:
-        rack_name = rack_by_id[dev.rack_id].name if dev.rack_id and dev.rack_id in rack_by_id else ""
+        rack_obj = rack_by_id.get(dev.rack_id) if dev.rack_id else None
+        rack_name = rack_obj.name if rack_obj else ""
         status = eol_status(dev.eol_date)
         row = [
             dev.name,
             dev.hostname,
             rack_name,
+            (rack_obj.row_label if rack_obj else "") or "",
+            areas[rack_obj.area_id].name if rack_obj and rack_obj.area_id in areas else "",
             dev.vendor,
             dev.model,
             dev.serial,
@@ -179,6 +188,8 @@ def build_rbi_workbook(db: Session, project: Project) -> bytes:
             "yes" if dev.restricted else "no",
             dev.restricted_reason,
             dev.fan_orientation,
+            getattr(dev, "indicator_type", "") or "",
+            getattr(dev, "indicator_color", "") or "",
             dev.management_ip,
             dev.discovered_via,
             "yes" if dev.undocumented else "no",

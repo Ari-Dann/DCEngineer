@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
+  AisleRow,
   Area,
   Cable,
   Checklist,
@@ -10,14 +11,17 @@ import {
   Project as ProjectT,
   Rack,
   downloadAuth,
+  indicatorLabel,
+  layoutPath,
   projects,
 } from "../api";
 import { DeviceEditorModal, RackHeightField } from "../components/DeviceEditor";
 import ImportWizard from "../components/ImportWizard";
 import LocatePanel from "../components/LocatePanel";
 import PhotoGallery from "../components/PhotoGallery";
+import RelocateDialog, { RelocateKind } from "../components/RelocateDialog";
 
-const TABS = ["overview", "areas", "racks", "devices", "locate", "cables", "checklists", "handoffs", "lifecycle"] as const;
+const TABS = ["overview", "areas", "rows", "racks", "devices", "locate", "cables", "checklists", "handoffs", "lifecycle"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function Project() {
@@ -28,6 +32,7 @@ export default function Project() {
   const tab: Tab = TABS.includes(tabParam as Tab) ? (tabParam as Tab) : "overview";
   const [project, setProject] = useState<ProjectT | null>(null);
   const [areas, setAreas] = useState<Area[]>([]);
+  const [aisleRows, setAisleRows] = useState<AisleRow[]>([]);
   const [racks, setRacks] = useState<Rack[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [cables, setCables] = useState<Cable[]>([]);
@@ -35,14 +40,21 @@ export default function Project() {
   const [hands, setHands] = useState<Handoff[]>([]);
   const [error, setError] = useState("");
   const [areaName, setAreaName] = useState("");
+  const [rowName, setRowName] = useState("");
   const [rackName, setRackName] = useState("");
   const [rackHeight, setRackHeight] = useState(42);
-  const [rackRow, setRackRow] = useState("");
+  const [areaFilter, setAreaFilter] = useState<number | "">("");
+  const [rowFilter, setRowFilter] = useState<number | "">("");
+  const [deviceArea, setDeviceArea] = useState<number | "">("");
+  const [deviceRow, setDeviceRow] = useState<number | "">("");
+  const [deviceRack, setDeviceRack] = useState<number | "">("");
   const [filter, setFilter] = useState("");
   const [importMsg, setImportMsg] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [editing, setEditing] = useState<Device | null>(null);
   const [openArea, setOpenArea] = useState<number | null>(null);
+  const [editingArea, setEditingArea] = useState<Area | null>(null);
+  const [relocate, setRelocate] = useState<{ kind: RelocateKind; id: number; mode: "copy" | "move" } | null>(null);
   const [hand, setHand] = useState({
     handoff_date: new Date().toISOString().slice(0, 10),
     from_name: "",
@@ -67,6 +79,7 @@ export default function Project() {
       const p = await projects.get(pid);
       setProject(p);
       setAreas(await projects.areas(pid));
+      setAisleRows(await projects.rows(pid));
       setRacks(await projects.racks(pid));
       setDevices(await projects.devices(pid));
       setCables(await projects.cables(pid));
@@ -115,14 +128,38 @@ export default function Project() {
 
   if (!project) return <div className="page">{error || "Loading…"}</div>;
 
-  const shown = filter
-    ? devices.filter((d) =>
-        [d.name, d.hostname, d.serial, d.vendor, d.model, d.management_ip, d.function]
-          .join(" ")
-          .toLowerCase()
-          .includes(filter.toLowerCase()),
-      )
-    : devices;
+  const rowsForArea = areaFilter ? aisleRows.filter((r) => r.area_id === areaFilter) : aisleRows;
+  const racksForRow = racks.filter((r) => {
+    if (rowFilter && r.row_id !== rowFilter) return false;
+    if (areaFilter && r.area_id !== areaFilter && aisleRows.find((row) => row.id === r.row_id)?.area_id !== areaFilter) {
+      return false;
+    }
+    return true;
+  });
+  const deviceRows = deviceArea ? aisleRows.filter((r) => r.area_id === deviceArea) : aisleRows;
+  const deviceRacks = racks.filter((r) => {
+    if (deviceRow && r.row_id !== deviceRow) return false;
+    if (deviceArea && r.area_id !== deviceArea && aisleRows.find((row) => row.id === r.row_id)?.area_id !== deviceArea) {
+      return false;
+    }
+    return true;
+  });
+  const shown = devices.filter((d) => {
+    if (deviceRack && d.rack_id !== deviceRack) return false;
+    if (deviceRow || deviceArea) {
+      const rack = racks.find((r) => r.id === d.rack_id);
+      if (!rack) return false;
+      if (deviceRow && rack.row_id !== deviceRow) return false;
+      if (deviceArea && rack.area_id !== deviceArea && aisleRows.find((row) => row.id === rack.row_id)?.area_id !== deviceArea) {
+        return false;
+      }
+    }
+    if (!filter) return true;
+    return [d.name, d.hostname, d.serial, d.vendor, d.model, d.management_ip, d.function]
+      .join(" ")
+      .toLowerCase()
+      .includes(filter.toLowerCase());
+  });
 
   return (
     <div className="page">
@@ -209,21 +246,138 @@ export default function Project() {
             <input placeholder="Area / cage / hall" value={areaName} onChange={(e) => setAreaName(e.target.value)} required />
             <button className="btn primary">Add</button>
           </form>
-          {areas.map((a) => (
-            <div key={a.id}>
-              <button type="button" className="list-item clickable" onClick={() => setOpenArea(openArea === a.id ? null : a.id)}>
-                <div style={{ textAlign: "left" }}>
-                  <strong>{a.name}</strong>
-                  <div className="muted">
-                    {a.restricted ? a.restriction_type || "restricted" : "in scope"} · photos{" "}
-                    {a.photography_allowed ? "allowed" : "forbidden"}
-                  </div>
+          {areas.map((a) => {
+            const nested = aisleRows.filter((r) => r.area_id === a.id).length;
+            const rackCount = racks.filter((r) => r.area_id === a.id).length;
+            return (
+              <div key={a.id}>
+                <div className="list-item">
+                  <button type="button" className="list-item clickable" style={{ padding: 0, border: 0 }} onClick={() => setOpenArea(openArea === a.id ? null : a.id)}>
+                    <div style={{ textAlign: "left" }}>
+                      <strong>{a.name}</strong>
+                      <div className="muted">
+                        {nested} row{nested === 1 ? "" : "s"} · {rackCount} rack{rackCount === 1 ? "" : "s"} ·{" "}
+                        {a.restricted ? a.restriction_type || "restricted" : "in scope"} · photos{" "}
+                        {a.photography_allowed ? "allowed" : "forbidden"}
+                      </div>
+                    </div>
+                  </button>
+                  <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <button type="button" className="btn" onClick={() => setEditingArea(a)}>
+                      Edit
+                    </button>
+                    <button type="button" className="btn" onClick={() => setRelocate({ kind: "area", id: a.id, mode: "copy" })}>
+                      Copy
+                    </button>
+                    <button type="button" className="btn" onClick={() => setRelocate({ kind: "area", id: a.id, mode: "move" })}>
+                      Move
+                    </button>
+                  </span>
                 </div>
-                <span className="muted">photos</span>
-              </button>
-              {openArea === a.id && (
-                <PhotoGallery entityType="area" entityId={a.id} allowed={a.photography_allowed} />
-              )}
+                {editingArea?.id === a.id && (
+                  <form
+                    className="card"
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      await projects.updateArea(pid, a.id, editingArea);
+                      setEditingArea(null);
+                      load();
+                    }}
+                  >
+                    <label className="field">
+                      <span>Name</span>
+                      <input value={editingArea.name} onChange={(e) => setEditingArea({ ...editingArea, name: e.target.value })} />
+                    </label>
+                    <label className="check-row">
+                      <input
+                        type="checkbox"
+                        checked={editingArea.restricted}
+                        onChange={(e) => setEditingArea({ ...editingArea, restricted: e.target.checked })}
+                      />
+                      <span>Restricted</span>
+                    </label>
+                    <label className="check-row">
+                      <input
+                        type="checkbox"
+                        checked={editingArea.photography_allowed}
+                        onChange={(e) => setEditingArea({ ...editingArea, photography_allowed: e.target.checked })}
+                      />
+                      <span>Photography allowed</span>
+                    </label>
+                    <button className="btn primary">Save area</button>
+                  </form>
+                )}
+                {openArea === a.id && <PhotoGallery entityType="area" entityId={a.id} allowed={a.photography_allowed} />}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === "rows" && (
+        <div className="card">
+          <p className="muted">Rows belong to an area. Pick an area, then add or reassign rows.</p>
+          <label className="field">
+            <span>Area</span>
+            <select
+              value={areaFilter}
+              onChange={(e) => {
+                setAreaFilter(e.target.value ? Number(e.target.value) : "");
+              }}
+            >
+              <option value="">All areas</option>
+              {areas.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              await projects.addRow(pid, { name: rowName, area_id: areaFilter || null });
+              setRowName("");
+              load();
+            }}
+            style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+          >
+            <input placeholder="Row / aisle" value={rowName} onChange={(e) => setRowName(e.target.value)} required />
+            <button className="btn primary" disabled={!areaFilter}>
+              Add under area
+            </button>
+          </form>
+          {rowsForArea.map((r) => (
+            <div className="list-item" key={r.id}>
+              <div>
+                <strong>{r.name}</strong>
+                <div className="muted">
+                  {areas.find((a) => a.id === r.area_id)?.name || "no area"} ·{" "}
+                  {racks.filter((rack) => rack.row_id === r.id).length} racks
+                </div>
+              </div>
+              <span style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                <select
+                  value={r.area_id || ""}
+                  onChange={async (e) => {
+                    await projects.updateRow(pid, r.id, { name: r.name, area_id: e.target.value ? Number(e.target.value) : null, notes: r.notes });
+                    load();
+                  }}
+                >
+                  <option value="">no area</option>
+                  {areas.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" className="btn" onClick={() => setRelocate({ kind: "row", id: r.id, mode: "copy" })}>
+                  Copy
+                </button>
+                <button type="button" className="btn" onClick={() => setRelocate({ kind: "row", id: r.id, mode: "move" })}>
+                  Move
+                </button>
+              </span>
             </div>
           ))}
         </div>
@@ -231,10 +385,47 @@ export default function Project() {
 
       {tab === "racks" && (
         <div className="card">
+          <p className="muted">Racks belong to a row. Filter by area, then row, then add a rack.</p>
+          <div className="row">
+            <label className="field">
+              <span>Area</span>
+              <select
+                value={areaFilter}
+                onChange={(e) => {
+                  setAreaFilter(e.target.value ? Number(e.target.value) : "");
+                  setRowFilter("");
+                }}
+              >
+                <option value="">All areas</option>
+                {areas.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Row</span>
+              <select value={rowFilter} onChange={(e) => setRowFilter(e.target.value ? Number(e.target.value) : "")}>
+                <option value="">All rows</option>
+                {rowsForArea.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
           <form
             onSubmit={async (e) => {
               e.preventDefault();
-              await projects.addRack(pid, { name: rackName, ru_height: rackHeight, row_label: rackRow });
+              await projects.addRack(pid, {
+                name: rackName,
+                ru_height: rackHeight,
+                row_id: rowFilter || null,
+                area_id: areaFilter || null,
+                row_label: rowsForArea.find((r) => r.id === rowFilter)?.name || "",
+              });
               setRackName("");
               load();
             }}
@@ -244,24 +435,29 @@ export default function Project() {
                 <span>Rack name</span>
                 <input placeholder="A01" value={rackName} onChange={(e) => setRackName(e.target.value)} required />
               </label>
-              <label className="field">
-                <span>Row</span>
-                <input placeholder="A" value={rackRow} onChange={(e) => setRackRow(e.target.value)} />
-              </label>
             </div>
             <RackHeightField value={rackHeight} onChange={setRackHeight} />
-            <button className="btn primary">Add rack</button>
+            <button className="btn primary" disabled={!rowFilter}>
+              Add rack to row
+            </button>
           </form>
-          {racks.map((r) => (
-            <Link className="list-item" key={r.id} to={`/projects/${pid}/racks/${r.id}`}>
-              <div>
+          {racksForRow.map((r) => (
+            <div className="list-item" key={r.id}>
+              <Link to={`/projects/${pid}/racks/${r.id}`}>
                 <strong>{r.name}</strong>
                 <div className="muted">
-                  Row {r.row_label || "—"} · {r.ru_height}U
+                  {layoutPath(r, aisleRows, areas)} · {r.ru_height}U
                 </div>
-              </div>
-              <span className="muted">elevation →</span>
-            </Link>
+              </Link>
+              <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <button type="button" className="btn" onClick={() => setRelocate({ kind: "rack", id: r.id, mode: "copy" })}>
+                  Copy
+                </button>
+                <button type="button" className="btn" onClick={() => setRelocate({ kind: "rack", id: r.id, mode: "move" })}>
+                  Move
+                </button>
+              </span>
+            </div>
           ))}
         </div>
       )}
@@ -269,6 +465,54 @@ export default function Project() {
       {tab === "devices" && (
         <>
           <div className="card">
+            <div className="row three">
+              <label className="field">
+                <span>Area</span>
+                <select
+                  value={deviceArea}
+                  onChange={(e) => {
+                    setDeviceArea(e.target.value ? Number(e.target.value) : "");
+                    setDeviceRow("");
+                    setDeviceRack("");
+                  }}
+                >
+                  <option value="">All areas</option>
+                  {areas.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Row</span>
+                <select
+                  value={deviceRow}
+                  onChange={(e) => {
+                    setDeviceRow(e.target.value ? Number(e.target.value) : "");
+                    setDeviceRack("");
+                  }}
+                >
+                  <option value="">All rows</option>
+                  {deviceRows.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Rack</span>
+                <select value={deviceRack} onChange={(e) => setDeviceRack(e.target.value ? Number(e.target.value) : "")}>
+                  <option value="">All racks</option>
+                  {deviceRacks.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {layoutPath(r, aisleRows, areas)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
             <label className="field">
               <span>Filter</span>
               <input
@@ -290,36 +534,66 @@ export default function Project() {
               <thead>
                 <tr>
                   <th>Name</th>
+                  <th>Area</th>
+                  <th>Row</th>
                   <th>Rack</th>
                   <th>Vendor / model</th>
                   <th>Serial</th>
                   <th>RU</th>
                   <th>Fan</th>
+                  <th>LED / screen</th>
                   <th>EOL</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
-                {shown.map((d) => (
-                  <tr key={d.id} className="clickable" onClick={() => setEditing(d)}>
-                    <td>
-                      {d.name}
-                      {d.restricted ? " 🔒" : ""}
-                      {d.undocumented ? " ⚠" : ""}
-                    </td>
-                    <td>{racks.find((r) => r.id === d.rack_id)?.name || "—"}</td>
-                    <td>
-                      {d.vendor} {d.model}
-                    </td>
-                    <td>{d.serial}</td>
-                    <td>
-                      {d.ru_start || "—"}–{d.ru_end || "—"}
-                    </td>
-                    <td>{d.fan_orientation}</td>
-                    <td>
-                      <span className={`badge ${d.eol_status || "unknown"}`}>{d.eol_status || "unknown"}</span>
-                    </td>
-                  </tr>
-                ))}
+                {shown.map((d) => {
+                  const rack = racks.find((r) => r.id === d.rack_id);
+                  const row = aisleRows.find((r) => r.id === rack?.row_id);
+                  const area = areas.find((a) => a.id === (rack?.area_id || row?.area_id));
+                  return (
+                    <tr key={d.id} className="clickable" onClick={() => setEditing(d)}>
+                      <td>
+                        {d.name}
+                        {d.restricted ? " 🔒" : ""}
+                        {d.undocumented ? " ⚠" : ""}
+                      </td>
+                      <td>{area?.name || "—"}</td>
+                      <td>{row?.name || rack?.row_label || "—"}</td>
+                      <td>{rack?.name || "—"}</td>
+                      <td>
+                        {d.vendor} {d.model}
+                      </td>
+                      <td>{d.serial}</td>
+                      <td>
+                        {d.ru_start || "—"}–{d.ru_end || "—"}
+                      </td>
+                      <td>{d.fan_orientation}</td>
+                      <td>{indicatorLabel(d.indicator_type, d.indicator_color)}</td>
+                      <td>
+                        <span className={`badge ${d.eol_status || "unknown"}`}>{d.eol_status || "unknown"}</span>
+                      </td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            className="btn"
+                            onClick={() => setRelocate({ kind: "device", id: d.id, mode: "copy" })}
+                          >
+                            Copy
+                          </button>
+                          <button
+                            type="button"
+                            className="btn"
+                            onClick={() => setRelocate({ kind: "device", id: d.id, mode: "move" })}
+                          >
+                            Move
+                          </button>
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -327,7 +601,7 @@ export default function Project() {
       )}
 
       {tab === "locate" && (
-        <LocatePanel projectId={pid} racks={racks} onLocated={load} />
+        <LocatePanel projectId={pid} racks={racks} areas={areas} rows={aisleRows} onLocated={load} />
       )}
 
       {tab === "cables" && (
@@ -510,6 +784,20 @@ export default function Project() {
             setEditing(null);
             load();
           }}
+          onRelocate={(mode) => {
+            setRelocate({ kind: "device", id: editing.id, mode });
+            setEditing(null);
+          }}
+        />
+      )}
+      {relocate && (
+        <RelocateDialog
+          kind={relocate.kind}
+          mode={relocate.mode}
+          projectId={pid}
+          entityId={relocate.id}
+          onClose={() => setRelocate(null)}
+          onDone={load}
         />
       )}
     </div>

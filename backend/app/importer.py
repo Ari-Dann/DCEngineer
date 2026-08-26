@@ -13,7 +13,8 @@ from openpyxl import load_workbook
 from sqlalchemy.orm import Session
 
 from app.catalog import DEVICE_TYPES, IMPORT_FIELDS, learn_values
-from app.models import Device, Rack
+from app.layout import apply_row_to_rack, resolve_or_create_row
+from app.models import Area, Device, Rack
 
 HEADER_MAP = {
     "name": ("name", "device", "device name", "device_name", "unit", "label", "hostname/device"),
@@ -23,6 +24,8 @@ HEADER_MAP = {
     "serial": ("serial", "serial number", "serial_number", "sn", "s/n", "s/n."),
     "asset_tag": ("asset", "asset tag", "asset_tag", "tag", "asset no"),
     "rack": ("rack", "rack name", "rack_name", "cabinet", "cab"),
+    "row": ("row", "aisle", "row name", "row_name", "aisle name"),
+    "area": ("area", "hall", "cage", "room", "area name"),
     "ru_start": ("ru start", "ru_start", "ru", "u", "u start", "position", "ru position"),
     "ru_end": ("ru end", "ru_end", "u end"),
     "ru_height": ("height", "height u", "ru height", "ru_height", "u height"),
@@ -33,6 +36,8 @@ HEADER_MAP = {
     "eol_date": ("eol", "eol date", "eol_date", "end of life"),
     "eos_date": ("eos", "eos date", "eos_date", "end of sale", "end of support"),
     "fan_orientation": ("fan", "fan orientation", "fan_orientation", "airflow"),
+    "indicator_type": ("led", "screen", "display", "indicator", "led screen", "led/screen"),
+    "indicator_color": ("led color", "screen color", "indicator color", "color", "light color"),
 }
 
 KNOWN_FIELDS = {f["id"] for f in IMPORT_FIELDS}
@@ -353,6 +358,26 @@ def import_devices(
                 db.flush()
                 rack_cache[key] = rack
                 racks_created += 1
+            area_name = row.get("area", "").strip()
+            row_name = row.get("row", "").strip()
+            area = None
+            if area_name:
+                area = (
+                    db.query(Area)
+                    .filter(Area.project_id == project_id, Area.name == area_name)
+                    .first()
+                )
+                if not area:
+                    area = Area(project_id=project_id, name=area_name)
+                    db.add(area)
+                    db.flush()
+            aisle = resolve_or_create_row(
+                db,
+                project_id,
+                row_label=row_name,
+                area_id=area.id if area else rack.area_id,
+            )
+            apply_row_to_rack(rack, aisle, area.id if area else None)
 
         ru_start = _int(row.get("ru_start", ""))
         ru_end = _int(row.get("ru_end", ""))
@@ -388,6 +413,8 @@ def import_devices(
             eol_date=row.get("eol_date") or None,
             eos_date=row.get("eos_date") or None,
             fan_orientation=row.get("fan_orientation") or "unknown",
+            indicator_type=(row.get("indicator_type") or "unknown")[:32],
+            indicator_color=(row.get("indicator_color") or "unknown")[:32],
             discovered_via="import",
         )
         try:

@@ -17,6 +17,8 @@ export type DeviceDraft = {
   ru_start: number;
   ru_height: number;
   fan_orientation: string;
+  indicator_type: string;
+  indicator_color: string;
   management_ip: string;
   restricted: boolean;
   restricted_reason: string;
@@ -43,6 +45,8 @@ export function emptyDraft(rackId?: number | ""): DeviceDraft {
     ru_start: 1,
     ru_height: 1,
     fan_orientation: "front-intake",
+    indicator_type: "unknown",
+    indicator_color: "unknown",
     management_ip: "",
     restricted: false,
     restricted_reason: "",
@@ -72,6 +76,8 @@ export function draftFromDevice(d: Device): DeviceDraft {
     ru_start: start,
     ru_height: Math.max(1, end - start + 1),
     fan_orientation: d.fan_orientation || "unknown",
+    indicator_type: d.indicator_type || "unknown",
+    indicator_color: d.indicator_color || "unknown",
     management_ip: d.management_ip || "",
     restricted: d.restricted,
     restricted_reason: d.restricted_reason || "",
@@ -100,6 +106,8 @@ export function payloadFromDraft(draft: DeviceDraft) {
     ru_start: draft.ru_start,
     ru_end: draft.ru_start + draft.ru_height - 1,
     fan_orientation: draft.fan_orientation,
+    indicator_type: draft.indicator_type,
+    indicator_color: draft.indicator_type === "none" ? "none" : draft.indicator_color,
     management_ip: draft.management_ip,
     restricted: draft.restricted,
     restricted_reason: draft.restricted_reason,
@@ -415,6 +423,41 @@ export function DeviceFields({
           </button>
         ))}
       </div>
+      <span className="muted">LED / screen</span>
+      <div className="choice">
+        {(catalog?.indicator_types ?? []).map((option) => (
+          <button
+            type="button"
+            key={option.id}
+            className={`btn ${value.indicator_type === option.id ? "on" : ""}`}
+            onClick={() =>
+              set({
+                indicator_type: option.id,
+                indicator_color: option.id === "none" ? "none" : value.indicator_color === "none" ? "unknown" : value.indicator_color,
+              })
+            }
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      {value.indicator_type !== "none" && (
+        <>
+          <span className="muted">LED / screen color</span>
+          <div className="choice compact">
+            {(catalog?.indicator_colors ?? []).filter((option) => option.id !== "none").map((option) => (
+              <button
+                type="button"
+                key={option.id}
+                className={`btn ${value.indicator_color === option.id ? "on" : ""}`}
+                onClick={() => set({ indicator_color: option.id })}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
       <label className="check-row">
         <input type="checkbox" checked={value.restricted} onChange={(e) => set({ restricted: e.target.checked })} />
         <span>Restricted (government / EMSS) — do not photograph</span>
@@ -498,12 +541,14 @@ export function DeviceEditorModal({
   racks,
   onClose,
   onSaved,
+  onRelocate,
 }: {
   projectId: number;
   device: Device;
   racks: Rack[];
   onClose: () => void;
   onSaved: (d: Device) => void;
+  onRelocate?: (mode: "copy" | "move") => void;
 }) {
   const [draft, setDraft] = useState(draftFromDevice(device));
   const [error, setError] = useState("");
@@ -529,9 +574,21 @@ export function DeviceEditorModal({
       <form className="sheet" onSubmit={onSubmit}>
         <div className="camera-head">
           <h2>Edit {device.name}</h2>
-          <button type="button" className="btn" onClick={onClose}>
-            Close
-          </button>
+          <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {onRelocate && (
+              <>
+                <button type="button" className="btn" onClick={() => onRelocate("copy")}>
+                  Copy
+                </button>
+                <button type="button" className="btn" onClick={() => onRelocate("move")}>
+                  Move
+                </button>
+              </>
+            )}
+            <button type="button" className="btn" onClick={onClose}>
+              Close
+            </button>
+          </span>
         </div>
         {error && <div className="error">{error}</div>}
         <DeviceFields value={draft} onChange={setDraft} racks={racks} savedDeviceId={device.id} projectId={projectId} />

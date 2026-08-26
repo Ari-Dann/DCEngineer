@@ -141,22 +141,54 @@ export const projects = {
   areas: (id: number) => api<Area[]>(`/api/projects/${id}/areas`),
   addArea: (id: number, body: Partial<Area> & { name: string }) =>
     api<Area>(`/api/projects/${id}/areas`, { method: "POST", body: JSON.stringify(body) }),
+  updateArea: (id: number, areaId: number, body: Partial<Area> & { name: string }) =>
+    api<Area>(`/api/projects/${id}/areas/${areaId}`, { method: "PATCH", body: JSON.stringify(body) }),
+  rows: (id: number, areaId?: number) =>
+    api<AisleRow[]>(`/api/projects/${id}/rows${areaId ? `?area_id=${areaId}` : ""}`),
+  addRow: (id: number, body: Partial<AisleRow> & { name: string }) =>
+    api<AisleRow>(`/api/projects/${id}/rows`, { method: "POST", body: JSON.stringify(body) }),
+  updateRow: (id: number, rowId: number, body: Partial<AisleRow> & { name: string }) =>
+    api<AisleRow>(`/api/projects/${id}/rows/${rowId}`, { method: "PATCH", body: JSON.stringify(body) }),
   racks: (id: number) => api<Rack[]>(`/api/projects/${id}/racks`),
   addRack: (id: number, body: Partial<Rack> & { name: string }) =>
     api<Rack>(`/api/projects/${id}/racks`, { method: "POST", body: JSON.stringify(body) }),
   elevation: (pid: number, rid: number) => api<Elevation>(`/api/projects/${pid}/racks/${rid}/elevation`),
   updateRack: (pid: number, rid: number, body: Partial<Rack> & { name: string }) =>
     api<Rack>(`/api/projects/${pid}/racks/${rid}`, { method: "PATCH", body: JSON.stringify(body) }),
+  copyArea: (id: number, areaId: number, body: RelocateBody) =>
+    api<Area>(`/api/projects/${id}/areas/${areaId}/copy`, { method: "POST", body: JSON.stringify(body) }),
+  moveArea: (id: number, areaId: number, body: RelocateBody) =>
+    api<Area>(`/api/projects/${id}/areas/${areaId}/move`, { method: "POST", body: JSON.stringify(body) }),
+  copyRow: (id: number, rowId: number, body: RelocateBody) =>
+    api<AisleRow>(`/api/projects/${id}/rows/${rowId}/copy`, { method: "POST", body: JSON.stringify(body) }),
+  moveRow: (id: number, rowId: number, body: RelocateBody) =>
+    api<AisleRow>(`/api/projects/${id}/rows/${rowId}/move`, { method: "POST", body: JSON.stringify(body) }),
+  copyRack: (id: number, rackId: number, body: RelocateBody) =>
+    api<Rack>(`/api/projects/${id}/racks/${rackId}/copy`, { method: "POST", body: JSON.stringify(body) }),
+  moveRack: (id: number, rackId: number, body: RelocateBody) =>
+    api<Rack>(`/api/projects/${id}/racks/${rackId}/move`, { method: "POST", body: JSON.stringify(body) }),
+  copyDevice: (id: number, deviceId: number, body: RelocateBody) =>
+    api<Device>(`/api/projects/${id}/devices/${deviceId}/copy`, { method: "POST", body: JSON.stringify(body) }),
+  moveDevice: (id: number, deviceId: number, body: RelocateBody) =>
+    api<Device>(`/api/projects/${id}/devices/${deviceId}/move`, { method: "POST", body: JSON.stringify(body) }),
   devices: (id: number, extra = "") => api<Device[]>(`/api/projects/${id}/devices${extra}`),
   getDevice: (pid: number, did: number) => api<Device>(`/api/projects/${pid}/devices/${did}`),
   addDevice: (id: number, body: Partial<Device> & { name: string }) =>
     api<Device>(`/api/projects/${id}/devices`, { method: "POST", body: JSON.stringify(body) }),
   updateDevice: (pid: number, did: number, body: Partial<Device>) =>
     api<Device>(`/api/projects/${pid}/devices/${did}`, { method: "PATCH", body: JSON.stringify(body) }),
-  search: (id: number, q = "", unlocated = false) => {
+  search: (
+    id: number,
+    q = "",
+    unlocated = false,
+    extra?: { area_id?: number; row_id?: number; rack_id?: number },
+  ) => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
     if (unlocated) params.set("unlocated", "true");
+    if (extra?.area_id) params.set("area_id", String(extra.area_id));
+    if (extra?.row_id) params.set("row_id", String(extra.row_id));
+    if (extra?.rack_id) params.set("rack_id", String(extra.rack_id));
     const qs = params.toString();
     return api<SearchResult>(`/api/projects/${id}/search${qs ? `?${qs}` : ""}`);
   },
@@ -251,7 +283,7 @@ export type Attachment = {
   created_at: string;
 };
 
-export type SearchHit = Device & { rack_name?: string | null; rack_row?: string | null };
+export type SearchHit = Device & { rack_name?: string | null; rack_row?: string | null; area_name?: string | null };
 export type SearchResult = { query: string; count: number; devices: SearchHit[] };
 export type ImportResult = {
   created: number;
@@ -383,10 +415,28 @@ export type Area = {
   photography_allowed: boolean;
 };
 
+export type AisleRow = {
+  id: number;
+  project_id: number;
+  name: string;
+  area_id?: number | null;
+  notes: string;
+};
+
+export type RelocateBody = {
+  target_project_id: number;
+  target_area_id?: number | null;
+  target_row_id?: number | null;
+  target_rack_id?: number | null;
+  include_children?: boolean;
+  include_devices?: boolean;
+};
+
 export type Rack = {
   id: number;
   project_id: number;
   area_id?: number | null;
+  row_id?: number | null;
   name: string;
   row_label: string;
   position: string;
@@ -394,6 +444,12 @@ export type Rack = {
   width_inches: number;
   notes: string;
 };
+
+export function layoutPath(rack: Rack, rows: AisleRow[] = [], areas: Area[] = []) {
+  const row = rows.find((r) => r.id === rack.row_id);
+  const area = areas.find((a) => a.id === (rack.area_id || row?.area_id));
+  return [area?.name, row?.name || rack.row_label, rack.name].filter(Boolean).join(" / ");
+}
 
 export type Device = {
   id: number;
@@ -412,6 +468,8 @@ export type Device = {
   restricted: boolean;
   restricted_reason: string;
   fan_orientation: string;
+  indicator_type?: string;
+  indicator_color?: string;
   power_draw_watts?: number | null;
   management_ip: string;
   discovered_via: string;
@@ -422,6 +480,14 @@ export type Device = {
   notes: string;
   eol_status?: string | null;
 };
+
+export function indicatorLabel(type?: string, color?: string) {
+  const presence = type || "unknown";
+  if (presence === "none") return "none";
+  const tint = color || "unknown";
+  if (!tint || tint === "none" || tint === "unknown") return presence;
+  return `${presence} · ${tint}`;
+}
 
 export type PDU = {
   id: number;

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.deps import WriteUser, get_current_user
 from app.models import (
+    AisleRow,
     Area,
     BackupProcess,
     Cable,
@@ -29,6 +30,7 @@ from app.models import (
 )
 from app.catalog import learn_values
 from app.importer import import_devices, preview_import
+from app.layout import apply_relocate, apply_row_to_rack, backfill_rows, resolve_or_create_row
 from app.rbi_export import eol_status
 from app.schemas import (
     AreaIn,
@@ -59,6 +61,9 @@ from app.schemas import (
     ProjectOut,
     RackIn,
     RackOut,
+    RelocateIn,
+    RowIn,
+    RowOut,
     WorkOrderIn,
     WorkOrderOut,
 )
@@ -95,6 +100,42 @@ def _ensure_rack_fits(db: Session, rack_id: int | None, ru_end: int | None) -> N
     end = int(ru_end)
     if end > rack.ru_height:
         rack.ru_height = min(70, end)
+
+
+def _get_area(db: Session, project_id: int, area_id: int) -> Area:
+    area = db.get(Area, area_id)
+    if not area or area.project_id != project_id:
+        raise HTTPException(404, "Area not found")
+    return area
+
+
+def _get_row(db: Session, project_id: int, row_id: int) -> AisleRow:
+    row = db.get(AisleRow, row_id)
+    if not row or row.project_id != project_id:
+        raise HTTPException(404, "Row not found")
+    return row
+
+
+def _get_rack(db: Session, project_id: int, rack_id: int) -> Rack:
+    rack = db.get(Rack, rack_id)
+    if not rack or rack.project_id != project_id:
+        raise HTTPException(404, "Rack not found")
+    return rack
+
+
+def _get_device(db: Session, project_id: int, device_id: int) -> Device:
+    device = db.get(Device, device_id)
+    if not device or device.project_id != project_id:
+        raise HTTPException(404, "Device not found")
+    return device
+
+
+def _relocate(db: Session, kind: str, entity, body: RelocateIn, copy: bool):
+    _get_project(db, body.target_project_id)
+    result = apply_relocate(db, kind=kind, entity=entity, body=body, copy=copy)
+    db.commit()
+    db.refresh(result)
+    return result
 
 
 @projects_router.get("", response_model=list[ProjectOut])
@@ -183,16 +224,86 @@ def delete_area(project_id: int, area_id: int, db: Session = Depends(get_db), _:
     return {"ok": True}
 
 
-@projects_router.get("/{project_id}/racks", response_model=list[RackOut])
-def list_racks(project_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+@projects_router.get("/{project_id}/rows", response_model=list[RowOut])
+def list_rows(
+    project_id: int,
+    area_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
     _get_project(db, project_id)
-    return db.query(Rack).filter(Rack.project_id == project_id).order_by(Rack.name).all()
+    backfill_rows(db, project_id)
+    q = db.query(AisleRow).filter(AisleRow.project_id == project_id)
+    if area_id:
+        q = q.filter(AisleRow.area_id == area_id)
+    return q.order_by(AisleRow.name).all()
+
+
+@projects_router.post("/{project_id}/rows", response_model=RowOut, status_code=201)
+def create_row(project_id: int, body: RowIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)):
+    _get_project(db, project_id)
+    if body.area_id:
+        _get_area(db, project_id, body.area_id)
+    row = AisleRow(project_id=project_id, **body.model_dump())
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@projects_router.patch("/{project_id}/rows/{row_id}", response_model=RowOut)
+def update_row(project_id: int, row_id: int, body: RowIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)):
+    row = _get_row(db, project_id, row_id)
+    if body.area_id:
+        _get_area(db, project_id, body.area_id)
+    _apply(row, body.model_dump())
+    for rack in db.query(Rack).filter(Rack.row_id == row.id).all():
+        rack.row_label = row.name
+        rack.area_id = row.area_id
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@projects_router.delete("/{project_id}/rows/{row_id}")
+def delete_row(project_id: int, row_id: int, db: Session = Depends(get_db), _: User = Depends(WriteUser)):
+    row = _get_row(db, project_id, row_id)
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
+
+
+@projects_router.get("/{project_id}/racks", response_model=list[RackOut])
+def list_racks(
+    project_id: int,
+    area_id: Optional[int] = None,
+    row_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    _get_project(db, project_id)
+    backfill_rows(db, project_id)
+    q = db.query(Rack).filter(Rack.project_id == project_id)
+    if area_id:
+        q = q.filter(Rack.area_id == area_id)
+    if row_id:
+        q = q.filter(Rack.row_id == row_id)
+    return q.order_by(Rack.name).all()
 
 
 @projects_router.post("/{project_id}/racks", response_model=RackOut, status_code=201)
 def create_rack(project_id: int, body: RackIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)):
     _get_project(db, project_id)
-    rack = Rack(project_id=project_id, **body.model_dump())
+    data = body.model_dump()
+    row = resolve_or_create_row(
+        db, project_id, row_id=data.get("row_id"), row_label=data.get("row_label") or "", area_id=data.get("area_id")
+    )
+    if row:
+        data["row_id"] = row.id
+        data["row_label"] = row.name
+        if row.area_id is not None:
+            data["area_id"] = row.area_id
+    rack = Rack(project_id=project_id, **data)
     db.add(rack)
     db.commit()
     db.refresh(rack)
@@ -201,10 +312,13 @@ def create_rack(project_id: int, body: RackIn, db: Session = Depends(get_db), _:
 
 @projects_router.patch("/{project_id}/racks/{rack_id}", response_model=RackOut)
 def update_rack(project_id: int, rack_id: int, body: RackIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)):
-    rack = db.get(Rack, rack_id)
-    if not rack or rack.project_id != project_id:
-        raise HTTPException(404, "Rack not found")
-    _apply(rack, body.model_dump())
+    rack = _get_rack(db, project_id, rack_id)
+    data = body.model_dump()
+    row = resolve_or_create_row(
+        db, project_id, row_id=data.get("row_id"), row_label=data.get("row_label") or "", area_id=data.get("area_id")
+    )
+    _apply(rack, data)
+    apply_row_to_rack(rack, row, data.get("area_id"))
     db.commit()
     db.refresh(rack)
     return rack
@@ -218,6 +332,48 @@ def delete_rack(project_id: int, rack_id: int, db: Session = Depends(get_db), _:
     db.delete(rack)
     db.commit()
     return {"ok": True}
+
+
+@projects_router.post("/{project_id}/areas/{area_id}/copy", response_model=AreaOut)
+def copy_area(
+    project_id: int, area_id: int, body: RelocateIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)
+):
+    return _relocate(db, "area", _get_area(db, project_id, area_id), body, True)
+
+
+@projects_router.post("/{project_id}/areas/{area_id}/move", response_model=AreaOut)
+def move_area(
+    project_id: int, area_id: int, body: RelocateIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)
+):
+    return _relocate(db, "area", _get_area(db, project_id, area_id), body, False)
+
+
+@projects_router.post("/{project_id}/rows/{row_id}/copy", response_model=RowOut)
+def copy_row(
+    project_id: int, row_id: int, body: RelocateIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)
+):
+    return _relocate(db, "row", _get_row(db, project_id, row_id), body, True)
+
+
+@projects_router.post("/{project_id}/rows/{row_id}/move", response_model=RowOut)
+def move_row(
+    project_id: int, row_id: int, body: RelocateIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)
+):
+    return _relocate(db, "row", _get_row(db, project_id, row_id), body, False)
+
+
+@projects_router.post("/{project_id}/racks/{rack_id}/copy", response_model=RackOut)
+def copy_rack(
+    project_id: int, rack_id: int, body: RelocateIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)
+):
+    return _relocate(db, "rack", _get_rack(db, project_id, rack_id), body, True)
+
+
+@projects_router.post("/{project_id}/racks/{rack_id}/move", response_model=RackOut)
+def move_rack(
+    project_id: int, rack_id: int, body: RelocateIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)
+):
+    return _relocate(db, "rack", _get_rack(db, project_id, rack_id), body, False)
 
 
 @projects_router.get("/{project_id}/racks/{rack_id}/elevation")
@@ -248,6 +404,8 @@ def list_devices(
     project_id: int,
     q: Optional[str] = None,
     rack_id: Optional[int] = None,
+    row_id: Optional[int] = None,
+    area_id: Optional[int] = None,
     eol: Optional[str] = None,
     unlocated: Optional[bool] = None,
     db: Session = Depends(get_db),
@@ -257,6 +415,12 @@ def list_devices(
     query = db.query(Device).filter(Device.project_id == project_id)
     if rack_id:
         query = query.filter(Device.rack_id == rack_id)
+    if row_id or area_id:
+        query = query.join(Rack, Device.rack_id == Rack.id, isouter=True)
+        if row_id:
+            query = query.filter(Rack.row_id == row_id)
+        if area_id:
+            query = query.filter(Rack.area_id == area_id)
     if unlocated:
         query = query.filter(Device.rack_id.is_(None) | Device.ru_start.is_(None))
     if q:
@@ -272,6 +436,8 @@ def list_devices(
                 Device.management_ip.ilike(like),
                 Device.function.ilike(like),
                 Device.notes.ilike(like),
+                Device.indicator_type.ilike(like),
+                Device.indicator_color.ilike(like),
             )
         )
     devices = query.order_by(Device.name).all()
@@ -294,15 +460,39 @@ def search_inventory(
     project_id: int,
     q: str = "",
     unlocated: bool = False,
+    area_id: Optional[int] = None,
+    row_id: Optional[int] = None,
+    rack_id: Optional[int] = None,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     _get_project(db, project_id)
+    backfill_rows(db, project_id)
     query = db.query(Device).filter(Device.project_id == project_id)
+    if rack_id:
+        query = query.filter(Device.rack_id == rack_id)
     if unlocated:
         query = query.filter(Device.rack_id.is_(None) | Device.ru_start.is_(None))
+    racks = {r.id: r for r in db.query(Rack).filter(Rack.project_id == project_id).all()}
+    rows = {r.id: r for r in db.query(AisleRow).filter(AisleRow.project_id == project_id).all()}
+    areas = {a.id: a for a in db.query(Area).filter(Area.project_id == project_id).all()}
+    if row_id or area_id:
+        allowed = {
+            rid
+            for rid, rack in racks.items()
+            if (not row_id or rack.row_id == row_id) and (not area_id or rack.area_id == area_id)
+        }
+        query = query.filter(Device.rack_id.in_(allowed) if allowed else Device.rack_id == -1)
     if q.strip():
         like = f"%{q.strip()}%"
+        rack_ids = [
+            rid
+            for rid, rack in racks.items()
+            if like[1:-1].lower() in (rack.name or "").lower()
+            or like[1:-1].lower() in (rack.row_label or "").lower()
+            or (rows.get(rack.row_id) and like[1:-1].lower() in rows[rack.row_id].name.lower())
+            or (areas.get(rack.area_id) and like[1:-1].lower() in areas[rack.area_id].name.lower())
+        ]
         query = query.filter(
             or_(
                 Device.name.ilike(like),
@@ -314,15 +504,20 @@ def search_inventory(
                 Device.management_ip.ilike(like),
                 Device.function.ilike(like),
                 Device.notes.ilike(like),
+                Device.indicator_type.ilike(like),
+                Device.indicator_color.ilike(like),
+                Device.rack_id.in_(rack_ids) if rack_ids else False,
             )
         )
-    racks = {r.id: r for r in db.query(Rack).filter(Rack.project_id == project_id).all()}
     hits = []
     for dev in query.order_by(Device.name).limit(200).all():
         item = device_out(dev).model_dump()
         rack = racks.get(dev.rack_id) if dev.rack_id else None
+        row = rows.get(rack.row_id) if rack and rack.row_id else None
+        area = areas.get(rack.area_id) if rack and rack.area_id else None
         item["rack_name"] = rack.name if rack else None
-        item["rack_row"] = rack.row_label if rack else None
+        item["rack_row"] = (row.name if row else None) or (rack.row_label if rack else None)
+        item["area_name"] = area.name if area else None
         hits.append(item)
     return {"query": q, "count": len(hits), "devices": hits}
 
@@ -405,9 +600,7 @@ def create_device(project_id: int, body: DeviceIn, db: Session = Depends(get_db)
 def update_device(
     project_id: int, device_id: int, body: DevicePatch, db: Session = Depends(get_db), _: User = Depends(WriteUser)
 ):
-    device = db.get(Device, device_id)
-    if not device or device.project_id != project_id:
-        raise HTTPException(404, "Device not found")
+    device = _get_device(db, project_id, device_id)
     _apply(device, body.model_dump(exclude_unset=True))
     _ensure_rack_fits(db, device.rack_id, device.ru_end)
     learn_values(
@@ -422,11 +615,23 @@ def update_device(
     return device_out(device)
 
 
+@projects_router.post("/{project_id}/devices/{device_id}/copy", response_model=DeviceOut)
+def copy_device(
+    project_id: int, device_id: int, body: RelocateIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)
+):
+    return device_out(_relocate(db, "device", _get_device(db, project_id, device_id), body, True))
+
+
+@projects_router.post("/{project_id}/devices/{device_id}/move", response_model=DeviceOut)
+def move_device(
+    project_id: int, device_id: int, body: RelocateIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)
+):
+    return device_out(_relocate(db, "device", _get_device(db, project_id, device_id), body, False))
+
+
 @projects_router.delete("/{project_id}/devices/{device_id}")
 def delete_device(project_id: int, device_id: int, db: Session = Depends(get_db), _: User = Depends(WriteUser)):
-    device = db.get(Device, device_id)
-    if not device or device.project_id != project_id:
-        raise HTTPException(404, "Device not found")
+    device = _get_device(db, project_id, device_id)
     db.delete(device)
     db.commit()
     return {"ok": True}

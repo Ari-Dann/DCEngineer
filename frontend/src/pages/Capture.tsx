@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Device, Project, Rack, enqueue, projects, uploadPhotos } from "../api";
+import { AisleRow, Area, Device, Project, Rack, enqueue, layoutPath, projects, uploadPhotos } from "../api";
 import { DeviceEditorModal, DeviceFields, emptyDraft, payloadFromDraft } from "../components/DeviceEditor";
 import LocatePanel from "../components/LocatePanel";
 import type { DeviceDraft } from "../components/DeviceEditor";
@@ -7,9 +7,13 @@ import { learnCatalog } from "../catalog";
 
 export default function Capture() {
   const [plist, setPlist] = useState<Project[]>([]);
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [aisleRows, setAisleRows] = useState<AisleRow[]>([]);
   const [racks, setRacks] = useState<Rack[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [pid, setPid] = useState<number | "">("");
+  const [areaId, setAreaId] = useState<number | "">("");
+  const [rowId, setRowId] = useState<number | "">("");
   const [rid, setRid] = useState<number | "">("");
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
@@ -28,18 +32,31 @@ export default function Capture() {
 
   useEffect(() => {
     if (!pid) return;
-    projects.racks(Number(pid)).then((rows) => {
-      setRacks(rows);
-      setRid((current) => {
-        if (current && rows.some((r) => r.id === current)) return current;
-        return rows[0]?.id || "";
-      });
-    });
+    Promise.all([projects.areas(Number(pid)), projects.rows(Number(pid)), projects.racks(Number(pid))]).then(
+      ([nextAreas, nextRows, nextRacks]) => {
+        setAreas(nextAreas);
+        setAisleRows(nextRows);
+        setRacks(nextRacks);
+        setAreaId((current) => (current && nextAreas.some((a) => a.id === current) ? current : ""));
+        setRowId((current) => (current && nextRows.some((r) => r.id === current) ? current : ""));
+        setRid((current) => {
+          if (current && nextRacks.some((r) => r.id === current)) return current;
+          return "";
+        });
+      },
+    );
   }, [pid]);
 
   useEffect(() => {
     setDraft((d) => ({ ...d, rack_id: rid }));
   }, [rid]);
+
+  const visibleRows = areaId ? aisleRows.filter((r) => r.area_id === areaId) : aisleRows;
+  const visibleRacks = racks.filter((r) => {
+    if (rowId && r.row_id !== rowId) return false;
+    if (areaId && r.area_id !== areaId && aisleRows.find((row) => row.id === r.row_id)?.area_id !== areaId) return false;
+    return true;
+  });
 
   async function loadDevices() {
     if (!pid) return;
@@ -76,7 +93,14 @@ export default function Capture() {
         function: created.function,
       });
       setCatalogNonce((n) => n + 1);
-      setDraft({ ...emptyDraft(rid), device_type: draft.device_type, vendor: draft.vendor, fan_orientation: draft.fan_orientation });
+      setDraft({
+        ...emptyDraft(rid),
+        device_type: draft.device_type,
+        vendor: draft.vendor,
+        fan_orientation: draft.fan_orientation,
+        indicator_type: draft.indicator_type,
+        indicator_color: draft.indicator_type === "none" ? "none" : draft.indicator_color,
+      });
       setPhotos([]);
       setMsg(`Saved ${created.name}. Ready for the next device.`);
       await loadDevices();
@@ -114,12 +138,49 @@ export default function Capture() {
             </select>
           </label>
           <label className="field">
+            <span>Area</span>
+            <select
+              value={areaId}
+              onChange={(e) => {
+                setAreaId(e.target.value ? Number(e.target.value) : "");
+                setRowId("");
+                setRid("");
+              }}
+            >
+              <option value="">All areas / unlocated</option>
+              {areas.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="row">
+          <label className="field">
+            <span>Row</span>
+            <select
+              value={rowId}
+              onChange={(e) => {
+                setRowId(e.target.value ? Number(e.target.value) : "");
+                setRid("");
+              }}
+            >
+              <option value="">All rows / unlocated</option>
+              {visibleRows.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
             <span>Rack</span>
             <select value={rid} onChange={(e) => setRid(e.target.value ? Number(e.target.value) : "")}>
               <option value="">Unlocated</option>
-              {racks.map((r) => (
+              {visibleRacks.map((r) => (
                 <option key={r.id} value={r.id}>
-                  {r.name} ({r.ru_height}U)
+                  {layoutPath(r, aisleRows, areas)} ({r.ru_height}U)
                 </option>
               ))}
             </select>
@@ -144,6 +205,8 @@ export default function Capture() {
           <LocatePanel
             projectId={Number(pid)}
             racks={racks}
+            areas={areas}
+            rows={aisleRows}
             defaultRackId={rid}
             onLocated={() => loadDevices()}
           />
