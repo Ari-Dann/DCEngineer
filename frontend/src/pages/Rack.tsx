@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Device, Elevation, PDU, Rack, downloadAuth, projects, uploadPhotos } from "../api";
+import { AisleRow, Area, Device, Elevation, PDU, Rack, downloadAuth, layoutPath, projects, uploadPhotos } from "../api";
 import {
   DeviceDraft,
   DeviceEditorModal,
@@ -17,6 +17,8 @@ export default function RackPage() {
   const rid = Number(rackId);
   const [elev, setElev] = useState<Elevation | null>(null);
   const [racks, setRacks] = useState<Rack[]>([]);
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [aisleRows, setAisleRows] = useState<AisleRow[]>([]);
   const [pdus, setPdus] = useState<PDU[]>([]);
   const [error, setError] = useState("");
   const [draft, setDraft] = useState<DeviceDraft>(emptyDraft(rid));
@@ -32,6 +34,8 @@ export default function RackPage() {
       setHeight(next.rack.ru_height);
       setPdus(await projects.pdus(pid, rid));
       setRacks(await projects.racks(pid));
+      setAreas(await projects.areas(pid));
+      setAisleRows(await projects.rows(pid));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     }
@@ -76,7 +80,7 @@ export default function RackPage() {
         <div>
           <h1>Rack {elev.rack.name}</h1>
           <p>
-            {elev.rack.ru_height}U · row {elev.rack.row_label || "—"}
+            {layoutPath(elev.rack, aisleRows, areas)} · {elev.rack.ru_height}U
           </p>
         </div>
         <button

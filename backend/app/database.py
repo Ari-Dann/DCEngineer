@@ -1,6 +1,6 @@
 from collections.abc import Generator
 
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
@@ -51,7 +51,25 @@ def init_db() -> None:
     from app import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    _ensure_columns()
     if get_settings().database_url.startswith("sqlite"):
         with engine.connect() as conn:
             conn.execute(text("PRAGMA journal_mode=WAL"))
             conn.commit()
+
+
+def _ensure_columns() -> None:
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "racks" in tables:
+        cols = {c["name"] for c in inspector.get_columns("racks")}
+        if "row_id" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE racks ADD COLUMN row_id INTEGER"))
+    if "devices" in tables:
+        dcols = {c["name"] for c in inspector.get_columns("devices")}
+        with engine.begin() as conn:
+            if "indicator_type" not in dcols:
+                conn.execute(text("ALTER TABLE devices ADD COLUMN indicator_type VARCHAR(32) DEFAULT 'unknown'"))
+            if "indicator_color" not in dcols:
+                conn.execute(text("ALTER TABLE devices ADD COLUMN indicator_color VARCHAR(32) DEFAULT 'unknown'"))

@@ -115,9 +115,29 @@ class AreaOut(AreaIn, ORMModel):
     project_id: int
 
 
+class RowIn(BaseModel):
+    name: str
+    area_id: Optional[int] = None
+    notes: str = ""
+
+
+class RowOut(RowIn, ORMModel):
+    id: int
+    project_id: int
+
+
+class RelocateIn(BaseModel):
+    target_project_id: int
+    target_area_id: Optional[int] = None
+    target_row_id: Optional[int] = None
+    include_children: bool = True
+    include_devices: bool = False
+
+
 class RackIn(BaseModel):
     name: str
     area_id: Optional[int] = None
+    row_id: Optional[int] = None
     row_label: str = ""
     position: str = ""
     ru_height: int = Field(default=42, ge=1, le=70)
@@ -145,6 +165,8 @@ class DeviceIn(BaseModel):
     restricted: bool = False
     restricted_reason: str = ""
     fan_orientation: str = "unknown"
+    indicator_type: str = "unknown"
+    indicator_color: str = "unknown"
     power_draw_watts: Optional[int] = None
     management_ip: str = ""
     discovered_via: str = "physical"
@@ -170,6 +192,8 @@ class DevicePatch(BaseModel):
     restricted: Optional[bool] = None
     restricted_reason: Optional[str] = None
     fan_orientation: Optional[str] = None
+    indicator_type: Optional[str] = None
+    indicator_color: Optional[str] = None
     power_draw_watts: Optional[int] = None
     management_ip: Optional[str] = None
     discovered_via: Optional[str] = None

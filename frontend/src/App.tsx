@@ -25,7 +25,7 @@ function Layout({ children }: { children: ReactNode }) {
   const items = [
     { to: "/", label: "Home", d: "M4 10.5 12 4l8 6.5V20H4z" },
     { to: "/capture", label: "Capture", d: "M4 7h4l2-2h4l2 2h4v12H4z M12 10a3 3 0 1 1 0 6 3 3 0 0 1 0-6z" },
-    { to: "/projects", label: "Floor", d: "M4 20V4h6v16H4zm10-10h6v10h-6z" },
+    { to: "/projects", label: "Project", d: "M4 20V4h6v16H4zm10-10h6v10h-6z" },
     { to: "/work", label: "Work", d: "M9 5h6l2 3h5v12H2V8h5z" },
     { to: "/ops", label: "More", d: "M5 7h14M5 12h14M5 17h10" },
   ];

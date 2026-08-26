@@ -507,3 +507,114 @@ def test_import_preview_mapping_and_rbi_sheet(client, auth):
     assert "SN-COL-A" in serials
     assert "SN-COL-B" in serials
     assert any(d["vendor"] == "Juniper" and d["model"] == "EX4400" for d in rows)
+
+
+def test_area_row_rack_hierarchy_copy_move_search(client, auth):
+    src = client.post("/api/projects", headers=auth, json={"name": "Layout src", "customer": "Acme"})
+    assert src.status_code == 201, src.text
+    pid = src.json()["id"]
+    dest = client.post("/api/projects", headers=auth, json={"name": "Layout dest"})
+    dest_id = dest.json()["id"]
+
+    hall = client.post(
+        f"/api/projects/{pid}/areas",
+        headers=auth,
+        json={"name": "Hall A", "in_scope": True},
+    )
+    assert hall.status_code == 201, hall.text
+    hall_id = hall.json()["id"]
+    hall_b = client.post(
+        f"/api/projects/{pid}/areas",
+        headers=auth,
+        json={"name": "Hall B"},
+    )
+    hall_b_id = hall_b.json()["id"]
+
+    row = client.post(
+        f"/api/projects/{pid}/rows",
+        headers=auth,
+        json={"name": "Row 1", "area_id": hall_id},
+    )
+    assert row.status_code == 201, row.text
+    row_id = row.json()["id"]
+    assert row.json()["area_id"] == hall_id
+
+    rack = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "A01", "row_id": row_id, "area_id": hall_id, "ru_height": 42},
+    )
+    assert rack.status_code == 201, rack.text
+    rid = rack.json()["id"]
+    assert rack.json()["row_id"] == row_id
+    assert rack.json()["row_label"] == "Row 1"
+    assert rack.json()["area_id"] == hall_id
+
+    device = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={"name": "sw-a01", "rack_id": rid, "vendor": "Cisco", "serial": "SN-ROW", "device_type": "switch"},
+    )
+    assert device.status_code == 201, device.text
+
+    reassigned = client.patch(
+        f"/api/projects/{pid}/rows/{row_id}",
+        headers=auth,
+        json={"name": "Row 1", "area_id": hall_b_id},
+    )
+    assert reassigned.status_code == 200, reassigned.text
+    assert reassigned.json()["area_id"] == hall_b_id
+    moved_rack = client.get(f"/api/projects/{pid}/racks", headers=auth).json()
+    assert any(r["id"] == rid and r["area_id"] == hall_b_id for r in moved_rack)
+
+    copied = client.post(
+        f"/api/projects/{pid}/areas/{hall_b_id}/copy",
+        headers=auth,
+        json={"target_project_id": dest_id, "include_children": True, "include_devices": False},
+    )
+    assert copied.status_code == 200, copied.text
+    dest_areas = client.get(f"/api/projects/{dest_id}/areas", headers=auth).json()
+    dest_rows = client.get(f"/api/projects/{dest_id}/rows", headers=auth).json()
+    dest_racks = client.get(f"/api/projects/{dest_id}/racks", headers=auth).json()
+    dest_devices = client.get(f"/api/projects/{dest_id}/devices", headers=auth).json()
+    assert any(a["name"] == "Hall B" for a in dest_areas)
+    assert any(r["name"] == "Row 1" for r in dest_rows)
+    assert any(r["name"] == "A01" for r in dest_racks)
+    assert dest_devices == []
+
+    still_src = client.get(f"/api/projects/{pid}/racks", headers=auth).json()
+    assert any(r["id"] == rid for r in still_src)
+
+    dest_rows = client.get(f"/api/projects/{dest_id}/rows", headers=auth).json()
+    dest_row_id = next(r["id"] for r in dest_rows if r["name"] == "Row 1")
+    moved = client.post(
+        f"/api/projects/{pid}/racks/{rid}/move",
+        headers=auth,
+        json={"target_project_id": dest_id, "target_row_id": dest_row_id, "include_devices": True},
+    )
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["project_id"] == dest_id
+    src_racks = client.get(f"/api/projects/{pid}/racks", headers=auth).json()
+    assert all(r["id"] != rid for r in src_racks)
+    dest_racks = client.get(f"/api/projects/{dest_id}/racks", headers=auth).json()
+    assert any(r["id"] == rid for r in dest_racks)
+    dest_devices = client.get(f"/api/projects/{dest_id}/devices", headers=auth).json()
+    assert any(d["serial"] == "SN-ROW" for d in dest_devices)
+
+    search = client.get(f"/api/projects/{dest_id}/search", headers=auth, params={"q": "Row 1"})
+    assert search.status_code == 200, search.text
+    hits = search.json()["devices"]
+    assert any(h["serial"] == "SN-ROW" for h in hits)
+    hit = next(h for h in hits if h["serial"] == "SN-ROW")
+    assert hit["rack_row"] == "Row 1"
+    assert hit["area_name"]
+
+    auto = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "B02", "row_label": "AutoRow", "ru_height": 42},
+    )
+    assert auto.status_code == 201, auto.text
+    assert auto.json()["row_id"]
+    listed = client.get(f"/api/projects/{pid}/rows", headers=auth).json()
+    assert any(r["name"] == "AutoRow" and r["id"] == auto.json()["row_id"] for r in listed)

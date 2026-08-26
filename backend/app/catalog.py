@@ -21,6 +21,26 @@ FAN_ORIENTATIONS = [
     {"id": "unknown", "label": "Unknown / not visible"},
 ]
 
+INDICATOR_TYPES = [
+    {"id": "none", "label": "None"},
+    {"id": "led", "label": "LED"},
+    {"id": "screen", "label": "Screen"},
+    {"id": "both", "label": "LED + screen"},
+    {"id": "unknown", "label": "Unknown"},
+]
+
+INDICATOR_COLORS = [
+    {"id": "none", "label": "N/A"},
+    {"id": "green", "label": "Green"},
+    {"id": "amber", "label": "Amber"},
+    {"id": "red", "label": "Red"},
+    {"id": "blue", "label": "Blue"},
+    {"id": "white", "label": "White"},
+    {"id": "mixed", "label": "Mixed / RGB"},
+    {"id": "off", "label": "Off / dark"},
+    {"id": "unknown", "label": "Unknown"},
+]
+
 VENDORS: dict[str, list[str]] = {
     "Cisco": [
         "Catalyst 9200",
@@ -347,6 +367,8 @@ def catalog_payload(db=None) -> dict:
     return {
         "device_types": device_types,
         "fan_orientations": FAN_ORIENTATIONS,
+        "indicator_types": INDICATOR_TYPES,
+        "indicator_colors": INDICATOR_COLORS,
         "vendors": ordered,
         "functions": functions,
         "rack_height_presets": RACK_HEIGHT_PRESETS,
@@ -364,6 +386,8 @@ IMPORT_FIELDS = [
     {"id": "serial", "label": "Serial"},
     {"id": "asset_tag", "label": "Asset tag"},
     {"id": "rack", "label": "Rack"},
+    {"id": "row", "label": "Row / aisle"},
+    {"id": "area", "label": "Area / hall"},
     {"id": "ru_start", "label": "RU start"},
     {"id": "ru_end", "label": "RU end"},
     {"id": "ru_height", "label": "Height (U)"},
@@ -374,4 +398,6 @@ IMPORT_FIELDS = [
     {"id": "eol_date", "label": "EOL date"},
     {"id": "eos_date", "label": "EOS date"},
     {"id": "fan_orientation", "label": "Fan orientation"},
+    {"id": "indicator_type", "label": "LED / screen"},
+    {"id": "indicator_color", "label": "LED / screen color"},
 ]
