@@ -272,15 +272,26 @@ def learn_values(
     device_type = _clean(device_type)
     function = _clean(function)
 
+    def has_static_vendor(name: str) -> bool:
+        return any(existing.lower() == name.lower() for existing in VENDORS)
+
+    def has_static_model(parent: str, name: str) -> bool:
+        for existing, models in VENDORS.items():
+            if existing.lower() == parent.lower() and any(m.lower() == name.lower() for m in models):
+                return True
+        return False
+
     def upsert(kind: str, value: str, parent: str = "") -> None:
         if not _is_custom(value):
             return
         parent = parent.strip()
-        existing = (
-            db.query(CatalogEntry)
-            .filter(CatalogEntry.kind == kind)
-            .all()
-        )
+        if kind == "vendor" and has_static_vendor(value):
+            return
+        if kind == "model" and has_static_model(parent, value):
+            return
+        if kind == "device_type" and value.lower() in {t.lower() for t in DEVICE_TYPES}:
+            return
+        existing = db.query(CatalogEntry).filter(CatalogEntry.kind == kind).all()
         for row in existing:
             if row.value.lower() == value.lower() and row.parent.lower() == parent.lower():
                 return
@@ -291,7 +302,7 @@ def learn_values(
         upsert("vendor", vendor)
         if _is_custom(model):
             upsert("model", model, vendor)
-    if _is_custom(device_type) and device_type.lower() not in {t.lower() for t in DEVICE_TYPES}:
+    if _is_custom(device_type):
         upsert("device_type", device_type)
     if _is_custom(function):
         upsert("function", function)

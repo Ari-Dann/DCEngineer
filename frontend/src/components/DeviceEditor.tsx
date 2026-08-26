@@ -128,41 +128,61 @@ function Combo({
 }) {
   const unique = Array.from(new Set(options.filter((o) => o && o.toLowerCase() !== OTHER.toLowerCase())));
   if (value && value.toLowerCase() !== OTHER.toLowerCase() && !unique.some((o) => o.toLowerCase() === value.toLowerCase())) {
-    unique.push(value);
+    unique.unshift(value);
   }
-  const known = unique.some((o) => o === value);
-  const selectValue = !value ? "" : known ? value : OTHER;
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState("");
+  const typed = (open ? filter : value).trim();
+  const needle = (open ? filter : "").trim().toLowerCase();
+  const shown = needle ? unique.filter((o) => o.toLowerCase().includes(needle)) : unique;
+  const isNew = Boolean(typed) && !unique.some((o) => o.toLowerCase() === typed.toLowerCase());
+
+  function pick(next: string) {
+    onChange(next);
+    setOpen(false);
+    setFilter("");
+    if (next) onCommit?.(next);
+  }
+
   return (
     <label className="field">
       <span>{label}</span>
-      <select
-        value={selectValue}
-        onChange={(e) => {
-          const next = e.target.value;
-          onChange(next === OTHER ? (known ? "" : value) || OTHER : next);
-        }}
-      >
-        <option value="">Select…</option>
-        {unique.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-        <option value={OTHER}>{OTHER}…</option>
-      </select>
-      {selectValue === OTHER && (
+      <div className="combo">
         <input
-          className="mt"
-          placeholder="Type a custom / Other value"
-          value={value === OTHER ? "" : value}
-          onChange={(e) => onChange(e.target.value)}
-          onBlur={() => {
-            const custom = (value === OTHER ? "" : value).trim();
-            if (custom) onCommit?.(custom);
-          }}
+          value={open ? filter : value}
+          placeholder="Type to search or add a new value"
           autoComplete="off"
+          onFocus={() => {
+            setFilter(value);
+            setOpen(true);
+          }}
+          onChange={(e) => {
+            setFilter(e.target.value);
+            setOpen(true);
+            onChange(e.target.value);
+          }}
+          onBlur={() => {
+            window.setTimeout(() => setOpen(false), 180);
+            const next = typed;
+            if (next) onCommit?.(next);
+          }}
         />
-      )}
+        {open && (
+          <div className="combo-list">
+            {shown.slice(0, 40).map((o) => (
+              <button type="button" key={o} onMouseDown={(e) => { e.preventDefault(); pick(o); }}>
+                {o}
+              </button>
+            ))}
+            {isNew && (
+              <button type="button" className="combo-add" onMouseDown={(e) => { e.preventDefault(); pick(typed); }}>
+                Add “{typed}” for next time
+              </button>
+            )}
+            {!shown.length && !isNew && <div className="muted" style={{ padding: 8 }}>No matches</div>}
+          </div>
+        )}
+      </div>
     </label>
   );
 }
