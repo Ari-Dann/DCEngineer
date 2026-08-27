@@ -808,16 +808,19 @@ def test_hierarchy_delete_unassigns_children(client, auth):
     assert gone_device.status_code == 200
     assert client.get(f"/api/projects/{pid}/devices/{device['id']}", headers=auth).status_code == 404
 
-    device = client.post(
+    device2 = client.post(
         f"/api/projects/{pid}/devices",
         headers=auth,
         json={"name": "sw-del-2", "rack_id": rack["id"], "serial": "SN-DEL-2", "ru_start": 11, "ru_end": 11},
-    ).json()
+    )
+    assert device2.status_code == 201, device2.text
+    did2 = device2.json()["id"]
     gone_rack = client.delete(f"/api/projects/{pid}/racks/{rack['id']}", headers=auth)
     assert gone_rack.status_code == 200
-    leftover = client.get(f"/api/projects/{pid}/devices/{device['id']}", headers=auth)
+    leftover = client.get(f"/api/projects/{pid}/devices/{did2}", headers=auth)
     assert leftover.status_code == 200
     assert leftover.json()["rack_id"] is None
+    assert leftover.json()["serial"] == "SN-DEL-2"
 
     rack = client.post(
         f"/api/projects/{pid}/racks",
