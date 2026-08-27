@@ -393,7 +393,11 @@ def _empty_result(errors: list[str] | None = None) -> dict:
 
 
 def _is_generic_sheet(name: str) -> bool:
-    return (name or "").strip().lower() in GENERIC_SHEET_NAMES
+    label = (name or "").strip().lower()
+    if label in GENERIC_SHEET_NAMES:
+        return True
+    # CSV/TXT uploads use the filename as the sheet title; that is not an area or row.
+    return label.endswith((".csv", ".txt", ".xlsx", ".ods", ".xls"))
 
 
 def _has_value(value: Any) -> bool:
