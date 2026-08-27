@@ -838,3 +838,170 @@ def test_hierarchy_delete_unassigns_children(client, auth):
     assert client.get(f"/api/projects/{pid}/areas", headers=auth).json() == []
     kept_rack = next(r for r in client.get(f"/api/projects/{pid}/racks", headers=auth).json() if r["id"] == rack["id"])
     assert kept_rack["area_id"] is None
+
+
+def _login(client, username, password):
+    res = client.post("/api/auth/login", json={"username": username, "password": password})
+    assert res.status_code == 200, res.text
+    return {"Authorization": f"Bearer {res.json()['access_token']}"}
+
+
+def _create_user(client, auth, username, role, password="engineer12"):
+    res = client.post(
+        "/api/users",
+        headers=auth,
+        json={
+            "username": username,
+            "email": f"{username}@example.test",
+            "password": password,
+            "full_name": username,
+            "role": role,
+        },
+    )
+    assert res.status_code == 201, res.text
+    return res.json()
+
+
+def _ods_bytes(headers, rows, sheet="Layout"):
+    import zipfile
+    from xml.etree.ElementTree import Element, SubElement, tostring
+
+    ns = {
+        "office": "urn:oasis:names:tc:opendocument:xmlns:office:1.0",
+        "table": "urn:oasis:names:tc:opendocument:xmlns:table:1.0",
+        "text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0",
+    }
+
+    def q(prefix, tag):
+        return f"{{{ns[prefix]}}}{tag}"
+
+    root = Element(q("office", "document-content"))
+    for prefix, uri in ns.items():
+        root.set(f"xmlns:{prefix}", uri)
+    body = SubElement(root, q("office", "body"))
+    spreadsheet = SubElement(body, q("office", "spreadsheet"))
+    table = SubElement(spreadsheet, q("table", "table"))
+    table.set(q("table", "name"), sheet)
+    for values in [headers, *rows]:
+        row_el = SubElement(table, q("table", "table-row"))
+        for value in values:
+            cell = SubElement(row_el, q("table", "table-cell"))
+            p = SubElement(cell, q("text", "p"))
+            p.text = str(value)
+    content = tostring(root, encoding="utf-8", xml_declaration=True)
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("mimetype", "application/vnd.oasis.opendocument.spreadsheet", compress_type=zipfile.ZIP_STORED)
+        zf.writestr("content.xml", content)
+    return buf.getvalue()
+
+
+def test_admin_rename_and_delete_project(client, auth):
+    created = client.post("/api/projects", headers=auth, json={"name": "Doomed site", "customer": "Acme"})
+    assert created.status_code == 201, created.text
+    pid = created.json()["id"]
+    client.post(f"/api/projects/{pid}/areas", headers=auth, json={"name": "Hall X"})
+    renamed = client.patch(
+        f"/api/projects/{pid}",
+        headers=auth,
+        json={"name": "Renamed site", "customer": "Acme"},
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["name"] == "Renamed site"
+    gone = client.delete(f"/api/projects/{pid}", headers=auth)
+    assert gone.status_code == 200, gone.text
+    assert client.get(f"/api/projects/{pid}", headers=auth).status_code == 404
+    names = [p["name"] for p in client.get("/api/projects", headers=auth).json()]
+    assert "Renamed site" not in names
+    assert "Doomed site" not in names
+
+
+def test_engineer_cannot_rename_or_delete_project_but_can_import(client, auth):
+    _create_user(client, auth, "eng-layout", "engineer")
+    _create_user(client, auth, "remote-layout", "remote")
+    eng = _login(client, "eng-layout", "engineer12")
+    remote = _login(client, "remote-layout", "engineer12")
+
+    project = client.post("/api/projects", headers=eng, json={"name": "Eng site"})
+    assert project.status_code == 201, project.text
+    pid = project.json()["id"]
+
+    blocked_rename = client.patch(f"/api/projects/{pid}", headers=eng, json={"name": "Hacked name"})
+    assert blocked_rename.status_code == 403
+    still = client.get(f"/api/projects/{pid}", headers=eng).json()
+    assert still["name"] == "Eng site"
+
+    blocked_delete = client.delete(f"/api/projects/{pid}", headers=eng)
+    assert blocked_delete.status_code == 403
+    assert client.get(f"/api/projects/{pid}", headers=eng).status_code == 200
+
+    csv_body = (
+        "area,aisle,rack,name,serial\n"
+        "Hall A,Row 1,A01,sw-a,SN-HALL\n"
+        "Hall A,Row 2,,,\n"
+        "Hall A,Row 3,A03,,\n"
+    )
+    imported = client.post(
+        f"/api/projects/{pid}/import",
+        headers=eng,
+        files={"file": ("hall.csv", csv_body.encode(), "text/csv")},
+    )
+    assert imported.status_code == 200, imported.text
+    summary = imported.json()
+    assert summary["areas_created"] >= 1
+    assert summary["rows_created"] >= 3
+    assert summary["racks_created"] >= 2
+    assert summary["created"] >= 1
+    areas = client.get(f"/api/projects/{pid}/areas", headers=eng).json()
+    rows = client.get(f"/api/projects/{pid}/rows", headers=eng).json()
+    racks = client.get(f"/api/projects/{pid}/racks", headers=eng).json()
+    assert any(a["name"] == "Hall A" for a in areas)
+    assert {r["name"] for r in rows} >= {"Row 1", "Row 2", "Row 3"}
+    assert {r["name"] for r in racks} >= {"A01", "A03"}
+    hall_id = next(a["id"] for a in areas if a["name"] == "Hall A")
+    assert all(r["area_id"] == hall_id for r in rows if r["name"].startswith("Row"))
+
+    remote_import = client.post(
+        f"/api/projects/{pid}/import",
+        headers=remote,
+        files={"file": ("hall.csv", csv_body.encode(), "text/csv")},
+    )
+    assert remote_import.status_code == 403
+    remote_preview = client.post(
+        "/api/imports/preview",
+        headers=remote,
+        files={"file": ("hall.csv", csv_body.encode(), "text/csv")},
+    )
+    assert remote_preview.status_code == 403
+
+
+def test_import_ods_and_default_area_layout(client, auth):
+    project = client.post("/api/projects", headers=auth, json={"name": "ODS site"})
+    pid = project.json()["id"]
+    area = client.post(f"/api/projects/{pid}/areas", headers=auth, json={"name": "Cage 7"}).json()
+    ods = _ods_bytes(
+        ["Aisle", "Rack", "Name", "Serial"],
+        [
+            ["Aisle 1", "C01", "leaf-1", "SN-ODS-1"],
+            ["Aisle 2", "", "", ""],
+            ["Aisle 1", "C02", "", ""],
+        ],
+    )
+    imported = client.post(
+        f"/api/projects/{pid}/import",
+        headers=auth,
+        data={"default_area_id": str(area["id"])},
+        files={"file": ("floor.ods", ods, "application/vnd.oasis.opendocument.spreadsheet")},
+    )
+    assert imported.status_code == 200, imported.text
+    summary = imported.json()
+    assert summary["rows_created"] >= 2
+    assert summary["racks_created"] >= 2
+    assert summary["created"] >= 1
+    rows = client.get(f"/api/projects/{pid}/rows", headers=auth).json()
+    racks = client.get(f"/api/projects/{pid}/racks", headers=auth).json()
+    assert any(r["name"] == "Aisle 1" and r["area_id"] == area["id"] for r in rows)
+    assert any(r["name"] == "Aisle 2" and r["area_id"] == area["id"] for r in rows)
+    assert {r["name"] for r in racks} >= {"C01", "C02"}
+    assert all(r["area_id"] == area["id"] for r in racks if r["name"] in {"C01", "C02"})
+

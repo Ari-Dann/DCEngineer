@@ -138,6 +138,7 @@ export const projects = {
   create: (body: Partial<Project> & { name: string }) => api<Project>("/api/projects", { method: "POST", body: JSON.stringify(body) }),
   update: (id: number, body: Partial<Project> & { name: string }) =>
     api<Project>(`/api/projects/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  delete: (id: number) => api<{ ok: boolean }>(`/api/projects/${id}`, { method: "DELETE" }),
   areas: (id: number) => api<Area[]>(`/api/projects/${id}/areas`),
   addArea: (id: number, body: Partial<Area> & { name: string }) =>
     api<Area>(`/api/projects/${id}/areas`, { method: "POST", body: JSON.stringify(body) }),
@@ -215,6 +216,7 @@ export const projects = {
     if (opts?.orientation) fd.append("orientation", opts.orientation);
     if (opts?.header_index != null) fd.append("header_index", String(opts.header_index));
     if (opts?.mapping) fd.append("mapping", JSON.stringify(opts.mapping));
+    if (opts?.default_area_id) fd.append("default_area_id", String(opts.default_area_id));
     return api<ImportResult>(`/api/projects/${id}/import`, { method: "POST", body: fd });
   },
   pdus: (pid: number, rid: number) => api<PDU[]>(`/api/projects/${pid}/racks/${rid}/pdus`),
@@ -297,6 +299,8 @@ export type ImportResult = {
   created: number;
   updated: number;
   racks_created: number;
+  areas_created?: number;
+  rows_created?: number;
   skipped: number;
   rows: number;
   errors: string[];
@@ -328,6 +332,7 @@ export type ImportOptions = {
   orientation?: "rows" | "columns";
   header_index?: number;
   mapping?: Record<string, number>;
+  default_area_id?: number;
 };
 
 async function authFetch(path: string, init: RequestInit = {}) {

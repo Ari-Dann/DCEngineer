@@ -226,16 +226,20 @@ Bootstrap admin is created **only when the user table is empty** (`BOOTSTRAP_ADM
 
 Every device field can be corrected later: click a device in Capture, the project Devices table, Lifecycle, or a filled RU on the rack elevation. Rack height is not limited to 42U — presets include 45, 47, 48, 52, and 58U, and any value from 1–70U is allowed. Placing a device above the current rack height grows the rack automatically.
 
-### Import CSV / XLSX
+### Import CSV / XLSX / ODS
 
-Project → **Devices** → choose a `.csv` or `.xlsx` file (legacy `.xls` is rejected). Headers are matched flexibly, for example:
+Admin and Engineer can import from Project → **Devices** (or **Areas**). Choose a `.csv`, `.xlsx`, or `.ods` file. Headers are matched flexibly, for example:
 
 ```text
-name,hostname,vendor,model,serial,asset tag,rack,ru start,height,type,function,management ip,notes,eol,eos
-core-rtr,core-rtr.site,Cisco,ASR 1001-X,FCW1234,A-100,A01,47,2,router,WAN edge,10.0.0.1,,2030-01-01,
+area,aisle,rack,name,hostname,vendor,model,serial,ru start,height,type
+Hall A,Row 1,A01,core-rtr,core-rtr.site,Cisco,ASR 1001-X,FCW1234,47,2,router
+Hall A,Row 2,,,
+Hall A,Row 3,A03,,,
 ```
 
-Rows with a matching serial are updated; others are created. Missing rack names are created (default 42U, grown if the RU is higher). Devices with no rack stay **unlocated** until you assign them under **Locate** or Capture.
+If the sheet contains **Area** and **Row/Aisle** columns, the import creates that layout and fills the area even when some lines have no device. Rows with a matching serial are updated; others are created. Missing rack names are created (default 42U, grown if the RU is higher). Devices with no rack stay **unlocated** until you assign them under **Locate** or Capture.
+
+Only an **Admin** can rename or delete an entire project.
 
 ### Photos
 

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   AisleRow,
   Area,
@@ -11,6 +11,7 @@ import {
   Project as ProjectT,
   Rack,
   downloadAuth,
+  getSession,
   indicatorLabel,
   layoutPath,
   projects,
@@ -21,6 +22,9 @@ import LocatePanel from "../components/LocatePanel";
 import PhotoGallery from "../components/PhotoGallery";
 import RelocateDialog, { RelocateKind } from "../components/RelocateDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { PromptDialog } from "../components/PromptDialog";
+import { ItemSelect, SelectMode, SelectModeToggle, SelectionToolbar } from "../components/SelectionBar";
+import { parseIdParam, projectHref, rackHref } from "../nav";
 
 const TABS = ["overview", "areas", "rows", "racks", "devices", "locate", "cables", "checklists", "handoffs", "lifecycle"] as const;
 type Tab = (typeof TABS)[number];
@@ -28,9 +32,15 @@ type Tab = (typeof TABS)[number];
 export default function Project() {
   const { id } = useParams();
   const pid = Number(id);
+  const navigate = useNavigate();
+  const role = getSession()?.role;
+  const isAdmin = role === "admin";
+  const canImport = role === "admin" || role === "engineer";
   const [params, setParams] = useSearchParams();
   const tabParam = params.get("tab");
   const tab: Tab = TABS.includes(tabParam as Tab) ? (tabParam as Tab) : "overview";
+  const areaFilter = parseIdParam(params.get("area"));
+  const rowFilter = parseIdParam(params.get("row"));
   const [project, setProject] = useState<ProjectT | null>(null);
   const [areas, setAreas] = useState<Area[]>([]);
   const [aisleRows, setAisleRows] = useState<AisleRow[]>([]);
@@ -44,8 +54,6 @@ export default function Project() {
   const [rowName, setRowName] = useState("");
   const [rackName, setRackName] = useState("");
   const [rackHeight, setRackHeight] = useState(42);
-  const [areaFilter, setAreaFilter] = useState<number | "">("");
-  const [rowFilter, setRowFilter] = useState<number | "">("");
   const [deviceArea, setDeviceArea] = useState<number | "">("");
   const [deviceRow, setDeviceRow] = useState<number | "">("");
   const [deviceRack, setDeviceRack] = useState<number | "">("");
@@ -55,13 +63,18 @@ export default function Project() {
   const [editing, setEditing] = useState<Device | null>(null);
   const [openArea, setOpenArea] = useState<number | null>(null);
   const [editingArea, setEditingArea] = useState<Area | null>(null);
-  const [relocate, setRelocate] = useState<{ kind: RelocateKind; id: number; mode: "copy" | "move" } | null>(null);
+  const [selectMode, setSelectMode] = useState<SelectMode>("one");
+  const [selected, setSelected] = useState<number[]>([]);
+  const [relocate, setRelocate] = useState<{ kind: RelocateKind; ids: number[]; mode: "copy" | "move" } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{
-    kind: RelocateKind;
-    id: number;
+    kind: RelocateKind | "project";
+    ids: number[];
     name: string;
     detail: string;
   } | null>(null);
+  const [renamingRow, setRenamingRow] = useState<AisleRow | null>(null);
+  const [renamingRack, setRenamingRack] = useState<Rack | null>(null);
+  const [renamingProject, setRenamingProject] = useState(false);
   const [hand, setHand] = useState({
     handoff_date: new Date().toISOString().slice(0, 10),
     from_name: "",
@@ -112,6 +125,27 @@ export default function Project() {
     if (next === "overview") nextParams.delete("tab");
     else nextParams.set("tab", next);
     setParams(nextParams, { replace: true });
+    setSelected([]);
+  }
+
+  function setHierarchy(next: { tab?: Tab; area?: number | ""; row?: number | "" }) {
+    const nextParams = new URLSearchParams(params);
+    const nextTab = next.tab ?? tab;
+    if (nextTab === "overview") nextParams.delete("tab");
+    else nextParams.set("tab", nextTab);
+    const area = next.area === undefined ? areaFilter : next.area;
+    const row = next.row === undefined ? rowFilter : next.row;
+    if (area) nextParams.set("area", String(area));
+    else nextParams.delete("area");
+    if (row) nextParams.set("row", String(row));
+    else nextParams.delete("row");
+    setParams(nextParams, { replace: true });
+    setSelected([]);
+  }
+
+  function changeSelectMode(next: SelectMode) {
+    setSelectMode(next);
+    setSelected((ids) => (next === "one" ? ids.slice(0, 1) : ids));
   }
 
   async function onImported(_target: number, result: ImportResult) {
@@ -120,13 +154,20 @@ export default function Project() {
     const placed = result.created + result.updated;
     const sheet = result.sheet ? ` from “${result.sheet}”` : "";
     const names = result.names?.length ? ` First records: ${result.names.slice(0, 8).join(", ")}.` : "";
-    if (placed === 0) {
+    const layout = [
+      result.areas_created ? `${result.areas_created} area${result.areas_created === 1 ? "" : "s"}` : "",
+      result.rows_created ? `${result.rows_created} row${result.rows_created === 1 ? "" : "s"}` : "",
+      result.racks_created ? `${result.racks_created} rack${result.racks_created === 1 ? "" : "s"}` : "",
+    ]
+      .filter(Boolean)
+      .join(", ");
+    if (placed === 0 && !layout) {
       setImportMsg(
         `Read ${result.rows} row${result.rows === 1 ? "" : "s"}${sheet} but none became devices (${result.skipped} skipped). Check the column mapping.`,
       );
     } else {
       setImportMsg(
-        `Imported ${placed} device${placed === 1 ? "" : "s"} into this project${sheet}: ${result.created} created, ${result.updated} updated, ${result.racks_created} racks added, ${result.skipped} skipped.${names}`,
+        `Imported${sheet}: ${result.created} created, ${result.updated} updated${layout ? `, layout ${layout}` : ""}, ${result.skipped} skipped.${names}`,
       );
     }
     if (result.errors.length) setError(result.errors.join(" · "));
@@ -135,6 +176,8 @@ export default function Project() {
 
   if (!project) return <div className="page">{error || "Loading…"}</div>;
 
+  const currentArea = areas.find((a) => a.id === areaFilter);
+  const currentRow = aisleRows.find((r) => r.id === rowFilter);
   const rowsForArea = areaFilter ? aisleRows.filter((r) => r.area_id === areaFilter) : aisleRows;
   const racksForRow = racks.filter((r) => {
     if (rowFilter && r.row_id !== rowFilter) return false;
@@ -170,6 +213,29 @@ export default function Project() {
 
   return (
     <div className="page">
+      <nav className="crumb">
+        <Link to="/projects">Projects</Link>
+        <span className="muted">/</span>
+        <Link to={projectHref(pid)} className={!currentArea && !currentRow ? "here" : undefined}>
+          {project.name}
+        </Link>
+        {currentArea && (
+          <>
+            <span className="muted">/</span>
+            <Link to={projectHref(pid, { tab: "rows", area: currentArea.id })} className={!currentRow ? "here" : undefined}>
+              {currentArea.name}
+            </Link>
+          </>
+        )}
+        {currentRow && (
+          <>
+            <span className="muted">/</span>
+            <Link to={projectHref(pid, { tab: "racks", area: currentRow.area_id, row: currentRow.id })} className="here">
+              {currentRow.name}
+            </Link>
+          </>
+        )}
+      </nav>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
           <h1>{project.name}</h1>
@@ -177,9 +243,32 @@ export default function Project() {
             {project.customer} · {project.site_name} · revision {project.revision}
           </p>
         </div>
-        <button className="btn primary" onClick={() => downloadAuth(projects.exportUrl(pid), `RBI-${project.name}.xlsx`)}>
-          Export RBI workbook
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {isAdmin && (
+            <>
+              <button type="button" className="btn" onClick={() => setRenamingProject(true)}>
+                Rename
+              </button>
+              <button
+                type="button"
+                className="btn danger"
+                onClick={() =>
+                  setPendingDelete({
+                    kind: "project",
+                    ids: [pid],
+                    name: project.name,
+                    detail: "This removes the entire project: areas, rows, racks, devices, cables, checklists, and hand-offs.",
+                  })
+                }
+              >
+                Delete project
+              </button>
+            </>
+          )}
+          <button className="btn primary" onClick={() => downloadAuth(projects.exportUrl(pid), `RBI-${project.name}.xlsx`)}>
+            Export RBI workbook
+          </button>
+        </div>
       </div>
       {error && <div className="error">{error}</div>}
       {importMsg && <div className="success">{importMsg}</div>}
@@ -194,6 +283,12 @@ export default function Project() {
       {tab === "overview" && (
         <>
           <form className="card" onSubmit={saveProject}>
+            {isAdmin && (
+              <label className="field">
+                <span>Project name</span>
+                <input value={project.name} onChange={(e) => setProject({ ...project, name: e.target.value })} required />
+              </label>
+            )}
             <div className="row">
               <label className="field">
                 <span>Status</span>
@@ -241,6 +336,7 @@ export default function Project() {
 
       {tab === "areas" && (
         <div className="card">
+          <p className="muted">Click an area to open its rows. Use Individual or Bulk to select items to edit, move, or delete.</p>
           <form
             onSubmit={async (e) => {
               e.preventDefault();
@@ -248,52 +344,65 @@ export default function Project() {
               setAreaName("");
               load();
             }}
-            style={{ display: "flex", gap: 8 }}
+            style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
           >
             <input placeholder="Area / cage / hall" value={areaName} onChange={(e) => setAreaName(e.target.value)} required />
             <button className="btn primary">Add</button>
+            {canImport && (
+              <button type="button" className="btn" onClick={() => setImportOpen(true)}>
+                Import CSV / XLSX / ODS
+              </button>
+            )}
           </form>
+          <SelectModeToggle mode={selectMode} onChange={changeSelectMode} />
+          <SelectionToolbar
+            noun="area"
+            selectedCount={selected.length}
+            total={areas.length}
+            onSelectAll={selectMode === "many" ? () => setSelected(areas.map((a) => a.id)) : undefined}
+            onClear={() => setSelected([])}
+            onEdit={() => {
+              const area = areas.find((a) => a.id === selected[0]);
+              if (area) setEditingArea(area);
+            }}
+            onCopy={() => setRelocate({ kind: "area", ids: selected, mode: "copy" })}
+            onMove={() => setRelocate({ kind: "area", ids: selected, mode: "move" })}
+            onDelete={() => {
+              const names = areas.filter((a) => selected.includes(a.id)).map((a) => a.name);
+              setPendingDelete({
+                kind: "area",
+                ids: selected,
+                name: names.join(", "),
+                detail: "Rows and racks stay in the project without these areas.",
+              });
+            }}
+          />
           {areas.map((a) => {
             const nested = aisleRows.filter((r) => r.area_id === a.id).length;
             const rackCount = racks.filter((r) => r.area_id === a.id).length;
             return (
               <div key={a.id}>
                 <div className="list-item">
-                  <button type="button" className="list-item clickable" style={{ padding: 0, border: 0 }} onClick={() => setOpenArea(openArea === a.id ? null : a.id)}>
-                    <div style={{ textAlign: "left" }}>
-                      <strong>{a.name}</strong>
-                      <div className="muted">
-                        {nested} row{nested === 1 ? "" : "s"} · {rackCount} rack{rackCount === 1 ? "" : "s"} ·{" "}
-                        {a.restricted ? a.restriction_type || "restricted" : "in scope"} · photos{" "}
-                        {a.photography_allowed ? "allowed" : "forbidden"}
-                      </div>
-                    </div>
-                  </button>
-                  <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <button type="button" className="btn" onClick={() => setEditingArea(a)}>
-                      Edit
-                    </button>
-                    <button type="button" className="btn" onClick={() => setRelocate({ kind: "area", id: a.id, mode: "copy" })}>
-                      Copy
-                    </button>
-                    <button type="button" className="btn" onClick={() => setRelocate({ kind: "area", id: a.id, mode: "move" })}>
-                      Move
-                    </button>
+                  <div className="list-main">
+                    <ItemSelect mode={selectMode} group="area-pick" id={a.id} selected={selected} onChange={setSelected} />
                     <button
                       type="button"
-                      className="btn danger"
-                      onClick={() =>
-                        setPendingDelete({
-                          kind: "area",
-                          id: a.id,
-                          name: a.name,
-                          detail: `${nested} row${nested === 1 ? "" : "s"} and ${rackCount} rack${rackCount === 1 ? "" : "s"} stay in the project without this area.`,
-                        })
-                      }
+                      className="list-main"
+                      onClick={() => setHierarchy({ tab: "rows", area: a.id, row: "" })}
                     >
-                      Delete
+                      <span>
+                        <strong>{a.name}</strong>
+                        <div className="muted">
+                          {nested} row{nested === 1 ? "" : "s"} · {rackCount} rack{rackCount === 1 ? "" : "s"} ·{" "}
+                          {a.restricted ? a.restriction_type || "restricted" : "in scope"} · photos{" "}
+                          {a.photography_allowed ? "allowed" : "forbidden"}
+                        </div>
+                      </span>
                     </button>
-                  </span>
+                  </div>
+                  <button type="button" className="btn" onClick={() => setOpenArea(openArea === a.id ? null : a.id)}>
+                    Photos
+                  </button>
                 </div>
                 {editingArea?.id === a.id && (
                   <form
@@ -337,14 +446,19 @@ export default function Project() {
 
       {tab === "rows" && (
         <div className="card">
-          <p className="muted">Rows belong to an area. Pick an area, then add or reassign rows.</p>
+          <p className="muted">
+            {currentArea ? `Rows in ${currentArea.name}. Click a row to open its racks.` : "Click a row to open its racks. Filter by area, or start from the Areas tab."}
+          </p>
+          {currentArea && (
+            <p>
+              <Link to={projectHref(pid, { tab: "areas" })}>← {currentArea.name}</Link>
+            </p>
+          )}
           <label className="field">
             <span>Area</span>
             <select
               value={areaFilter}
-              onChange={(e) => {
-                setAreaFilter(e.target.value ? Number(e.target.value) : "");
-              }}
+              onChange={(e) => setHierarchy({ tab: "rows", area: e.target.value ? Number(e.target.value) : "", row: "" })}
             >
               <option value="">All areas</option>
               {areas.map((a) => (
@@ -368,52 +482,47 @@ export default function Project() {
               Add under area
             </button>
           </form>
+          <SelectModeToggle mode={selectMode} onChange={changeSelectMode} />
+          <SelectionToolbar
+            noun="row"
+            selectedCount={selected.length}
+            total={rowsForArea.length}
+            onSelectAll={selectMode === "many" ? () => setSelected(rowsForArea.map((r) => r.id)) : undefined}
+            onClear={() => setSelected([])}
+            onEdit={() => {
+              const row = aisleRows.find((r) => r.id === selected[0]);
+              if (row) setRenamingRow(row);
+            }}
+            onCopy={() => setRelocate({ kind: "row", ids: selected, mode: "copy" })}
+            onMove={() => setRelocate({ kind: "row", ids: selected, mode: "move" })}
+            onDelete={() => {
+              const names = aisleRows.filter((r) => selected.includes(r.id)).map((r) => r.name);
+              setPendingDelete({
+                kind: "row",
+                ids: selected,
+                name: names.join(", "),
+                detail: "Racks stay in the project without these rows.",
+              });
+            }}
+          />
           {rowsForArea.map((r) => (
             <div className="list-item" key={r.id}>
-              <div>
-                <strong>{r.name}</strong>
-                <div className="muted">
-                  {areas.find((a) => a.id === r.area_id)?.name || "no area"} ·{" "}
-                  {racks.filter((rack) => rack.row_id === r.id).length} racks
-                </div>
-              </div>
-              <span style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                <select
-                  value={r.area_id || ""}
-                  onChange={async (e) => {
-                    await projects.updateRow(pid, r.id, { name: r.name, area_id: e.target.value ? Number(e.target.value) : null, notes: r.notes });
-                    load();
-                  }}
-                >
-                  <option value="">no area</option>
-                  {areas.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-                </select>
-                <button type="button" className="btn" onClick={() => setRelocate({ kind: "row", id: r.id, mode: "copy" })}>
-                  Copy
-                </button>
-                <button type="button" className="btn" onClick={() => setRelocate({ kind: "row", id: r.id, mode: "move" })}>
-                  Move
-                </button>
+              <div className="list-main">
+                <ItemSelect mode={selectMode} group="row-pick" id={r.id} selected={selected} onChange={setSelected} />
                 <button
                   type="button"
-                  className="btn danger"
-                  onClick={() => {
-                    const n = racks.filter((rack) => rack.row_id === r.id).length;
-                    setPendingDelete({
-                      kind: "row",
-                      id: r.id,
-                      name: r.name,
-                      detail: `${n} rack${n === 1 ? "" : "s"} stay in the project without this row.`,
-                    });
-                  }}
+                  className="list-main"
+                  onClick={() => setHierarchy({ tab: "racks", area: r.area_id || areaFilter || "", row: r.id })}
                 >
-                  Delete
+                  <span>
+                    <strong>{r.name}</strong>
+                    <div className="muted">
+                      {areas.find((a) => a.id === r.area_id)?.name || "no area"} ·{" "}
+                      {racks.filter((rack) => rack.row_id === r.id).length} racks
+                    </div>
+                  </span>
                 </button>
-              </span>
+              </div>
             </div>
           ))}
         </div>
@@ -421,16 +530,24 @@ export default function Project() {
 
       {tab === "racks" && (
         <div className="card">
-          <p className="muted">Racks belong to a row. Filter by area, then row, then add a rack.</p>
+          <p className="muted">
+            {currentRow
+              ? `Racks in ${currentRow.name}. Click a rack to open its elevation.`
+              : "Racks belong to a row. Open a row from the Rows tab, or filter below."}
+          </p>
+          {currentRow && (
+            <p>
+              <Link to={projectHref(pid, { tab: "rows", area: currentRow.area_id || areaFilter || "" })}>
+                ← {currentRow.name}
+              </Link>
+            </p>
+          )}
           <div className="row">
             <label className="field">
               <span>Area</span>
               <select
                 value={areaFilter}
-                onChange={(e) => {
-                  setAreaFilter(e.target.value ? Number(e.target.value) : "");
-                  setRowFilter("");
-                }}
+                onChange={(e) => setHierarchy({ tab: "racks", area: e.target.value ? Number(e.target.value) : "", row: "" })}
               >
                 <option value="">All areas</option>
                 {areas.map((a) => (
@@ -442,7 +559,10 @@ export default function Project() {
             </label>
             <label className="field">
               <span>Row</span>
-              <select value={rowFilter} onChange={(e) => setRowFilter(e.target.value ? Number(e.target.value) : "")}>
+              <select
+                value={rowFilter}
+                onChange={(e) => setHierarchy({ tab: "racks", row: e.target.value ? Number(e.target.value) : "" })}
+              >
                 <option value="">All rows</option>
                 {rowsForArea.map((r) => (
                   <option key={r.id} value={r.id}>
@@ -477,37 +597,45 @@ export default function Project() {
               Add rack to row
             </button>
           </form>
+          <SelectModeToggle mode={selectMode} onChange={changeSelectMode} />
+          <SelectionToolbar
+            noun="rack"
+            selectedCount={selected.length}
+            total={racksForRow.length}
+            onSelectAll={selectMode === "many" ? () => setSelected(racksForRow.map((r) => r.id)) : undefined}
+            onClear={() => setSelected([])}
+            onEdit={() => {
+              const rack = racks.find((r) => r.id === selected[0]);
+              if (rack) setRenamingRack(rack);
+            }}
+            onCopy={() => setRelocate({ kind: "rack", ids: selected, mode: "copy" })}
+            onMove={() => setRelocate({ kind: "rack", ids: selected, mode: "move" })}
+            onDelete={() => {
+              const names = racks.filter((r) => selected.includes(r.id)).map((r) => r.name);
+              setPendingDelete({
+                kind: "rack",
+                ids: selected,
+                name: names.join(", "),
+                detail: "Devices in these racks will become unlocated.",
+              });
+            }}
+          />
           {racksForRow.map((r) => (
             <div className="list-item" key={r.id}>
-              <Link to={`/projects/${pid}/racks/${r.id}`}>
-                <strong>{r.name}</strong>
-                <div className="muted">
-                  {layoutPath(r, aisleRows, areas)} · {r.ru_height}U
-                </div>
-              </Link>
-              <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                <button type="button" className="btn" onClick={() => setRelocate({ kind: "rack", id: r.id, mode: "copy" })}>
-                  Copy
-                </button>
-                <button type="button" className="btn" onClick={() => setRelocate({ kind: "rack", id: r.id, mode: "move" })}>
-                  Move
-                </button>
-                <button
-                  type="button"
-                  className="btn danger"
-                  onClick={() => {
-                    const n = devices.filter((d) => d.rack_id === r.id).length;
-                    setPendingDelete({
-                      kind: "rack",
-                      id: r.id,
-                      name: r.name,
-                      detail: `${n} device${n === 1 ? "" : "s"} in this rack will become unlocated.`,
-                    });
-                  }}
+              <div className="list-main">
+                <ItemSelect mode={selectMode} group="rack-pick" id={r.id} selected={selected} onChange={setSelected} />
+                <Link
+                  className="list-main"
+                  to={rackHref(pid, r.id, { area: r.area_id || areaFilter, row: r.row_id || rowFilter })}
                 >
-                  Delete
-                </button>
-              </span>
+                  <span>
+                    <strong>{r.name}</strong>
+                    <div className="muted">
+                      {layoutPath(r, aisleRows, areas)} · {r.ru_height}U
+                    </div>
+                  </span>
+                </Link>
+              </div>
             </div>
           ))}
         </div>
@@ -572,18 +700,45 @@ export default function Project() {
                 placeholder="name, serial, hostname, vendor…"
               />
             </label>
-            <button type="button" className="btn primary" onClick={() => setImportOpen(true)}>
-              Import CSV / XLSX
-            </button>
+            {canImport && (
+              <button type="button" className="btn primary" onClick={() => setImportOpen(true)}>
+                Import CSV / XLSX / ODS
+              </button>
+            )}
             <p className="muted">
-              Imports into this project. You choose the sheet and map columns or rows onto device fields. Unlocated
-              devices (no rack) show here and under Locate.
+              {canImport
+                ? "Imports into this project. Map Area and Row/Aisle columns to populate a whole area, even when some lines have no device."
+                : "Unlocated devices (no rack) show here and under Locate."}
             </p>
+            <SelectModeToggle mode={selectMode} onChange={changeSelectMode} />
+            <SelectionToolbar
+              noun="device"
+              selectedCount={selected.length}
+              total={shown.length}
+              onSelectAll={selectMode === "many" ? () => setSelected(shown.map((d) => d.id)) : undefined}
+              onClear={() => setSelected([])}
+              onEdit={() => {
+                const device = devices.find((d) => d.id === selected[0]);
+                if (device) setEditing(device);
+              }}
+              onCopy={() => setRelocate({ kind: "device", ids: selected, mode: "copy" })}
+              onMove={() => setRelocate({ kind: "device", ids: selected, mode: "move" })}
+              onDelete={() => {
+                const names = devices.filter((d) => selected.includes(d.id)).map((d) => d.name);
+                setPendingDelete({
+                  kind: "device",
+                  ids: selected,
+                  name: names.join(", "),
+                  detail: "Selected devices will be removed from the project.",
+                });
+              }}
+            />
           </div>
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
+                  <th></th>
                   <th>Name</th>
                   <th>Area</th>
                   <th>Row</th>
@@ -594,7 +749,6 @@ export default function Project() {
                   <th>Fan</th>
                   <th>LED / screen</th>
                   <th>EOL</th>
-                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -604,6 +758,9 @@ export default function Project() {
                   const area = areas.find((a) => a.id === (rack?.area_id || row?.area_id));
                   return (
                     <tr key={d.id} className="clickable" onClick={() => setEditing(d)}>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <ItemSelect mode={selectMode} group="device-pick" id={d.id} selected={selected} onChange={setSelected} />
+                      </td>
                       <td>
                         {d.name}
                         {d.restricted ? " 🔒" : ""}
@@ -623,38 +780,6 @@ export default function Project() {
                       <td>{indicatorLabel(d.indicator_type, d.indicator_color)}</td>
                       <td>
                         <span className={`badge ${d.eol_status || "unknown"}`}>{d.eol_status || "unknown"}</span>
-                      </td>
-                      <td onClick={(e) => e.stopPropagation()}>
-                        <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          <button
-                            type="button"
-                            className="btn"
-                            onClick={() => setRelocate({ kind: "device", id: d.id, mode: "copy" })}
-                          >
-                            Copy
-                          </button>
-                          <button
-                            type="button"
-                            className="btn"
-                            onClick={() => setRelocate({ kind: "device", id: d.id, mode: "move" })}
-                          >
-                            Move
-                          </button>
-                          <button
-                            type="button"
-                            className="btn danger"
-                            onClick={() =>
-                              setPendingDelete({
-                                kind: "device",
-                                id: d.id,
-                                name: d.name,
-                                detail: "This device will be removed from the project.",
-                              })
-                            }
-                          >
-                            Delete
-                          </button>
-                        </span>
                       </td>
                     </tr>
                   );
@@ -831,10 +956,11 @@ export default function Project() {
         </div>
       )}
 
-      {importOpen && (
+      {importOpen && canImport && (
         <ImportWizard
           projectList={project ? [project] : []}
           projectId={pid}
+          defaultAreaId={areaFilter || undefined}
           onClose={() => setImportOpen(false)}
           onImported={onImported}
         />
@@ -850,13 +976,13 @@ export default function Project() {
             load();
           }}
           onRelocate={(mode) => {
-            setRelocate({ kind: "device", id: editing.id, mode });
+            setRelocate({ kind: "device", ids: [editing.id], mode });
             setEditing(null);
           }}
           onDelete={() => {
             setPendingDelete({
               kind: "device",
-              id: editing.id,
+              ids: [editing.id],
               name: editing.name,
               detail: "This device will be removed from the project.",
             });
@@ -869,21 +995,68 @@ export default function Project() {
           kind={relocate.kind}
           mode={relocate.mode}
           projectId={pid}
-          entityId={relocate.id}
+          entityIds={relocate.ids}
           onClose={() => setRelocate(null)}
-          onDone={load}
+          onDone={() => {
+            setSelected([]);
+            load();
+          }}
         />
       )}
       {pendingDelete && (
         <ConfirmDialog
-          title={`Delete ${pendingDelete.kind} “${pendingDelete.name}”?`}
+          title={`Delete ${pendingDelete.kind}${pendingDelete.ids.length > 1 ? "s" : ""} “${pendingDelete.name}”?`}
           message={pendingDelete.detail}
           onClose={() => setPendingDelete(null)}
           onConfirm={async () => {
-            if (pendingDelete.kind === "area") await projects.deleteArea(pid, pendingDelete.id);
-            else if (pendingDelete.kind === "row") await projects.deleteRow(pid, pendingDelete.id);
-            else if (pendingDelete.kind === "rack") await projects.deleteRack(pid, pendingDelete.id);
-            else await projects.deleteDevice(pid, pendingDelete.id);
+            if (pendingDelete.kind === "project") {
+              await projects.delete(pid);
+              navigate("/projects");
+              return;
+            }
+            for (const entityId of pendingDelete.ids) {
+              if (pendingDelete.kind === "area") await projects.deleteArea(pid, entityId);
+              else if (pendingDelete.kind === "row") await projects.deleteRow(pid, entityId);
+              else if (pendingDelete.kind === "rack") await projects.deleteRack(pid, entityId);
+              else await projects.deleteDevice(pid, entityId);
+            }
+            setSelected([]);
+            load();
+          }}
+        />
+      )}
+      {renamingProject && project && (
+        <PromptDialog
+          title="Rename project"
+          label="Project name"
+          initial={project.name}
+          onClose={() => setRenamingProject(false)}
+          onSave={async (name) => {
+            await projects.update(pid, { ...project, name });
+            load();
+          }}
+        />
+      )}
+      {renamingRow && (
+        <PromptDialog
+          title={`Rename row “${renamingRow.name}”?`}
+          label="Row / aisle name"
+          initial={renamingRow.name}
+          onClose={() => setRenamingRow(null)}
+          onSave={async (name) => {
+            await projects.updateRow(pid, renamingRow.id, { name, area_id: renamingRow.area_id, notes: renamingRow.notes });
+            load();
+          }}
+        />
+      )}
+      {renamingRack && (
+        <PromptDialog
+          title={`Rename rack “${renamingRack.name}”?`}
+          label="Rack name"
+          initial={renamingRack.name}
+          onClose={() => setRenamingRack(null)}
+          onSave={async (name) => {
+            await projects.updateRack(pid, renamingRack.id, { ...renamingRack, name });
             load();
           }}
         />

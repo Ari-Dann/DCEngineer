@@ -1,5 +1,6 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
+  Area,
   ImportField,
   ImportPreview,
   ImportPreviewSheet,
@@ -40,11 +41,13 @@ function initialHeaderMap(sheet: ImportPreviewSheet): HeaderMap {
 export default function ImportWizard({
   projectList,
   projectId,
+  defaultAreaId: initialAreaId,
   onClose,
   onImported,
 }: {
   projectList: Project[];
   projectId?: number;
+  defaultAreaId?: number | "";
   onClose: () => void;
   onImported: (pid: number, result: ImportResult) => void;
 }) {
@@ -55,8 +58,20 @@ export default function ImportWizard({
   const [orientation, setOrientation] = useState<"rows" | "columns">("rows");
   const [headerIndex, setHeaderIndex] = useState(0);
   const [headerMap, setHeaderMap] = useState<HeaderMap>({});
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [defaultAreaId, setDefaultAreaId] = useState<number | "">(initialAreaId || "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!pid) {
+      setAreas([]);
+      setDefaultAreaId("");
+      return;
+    }
+    projects.areas(Number(pid)).then(setAreas).catch(() => setAreas([]));
+    setDefaultAreaId(initialAreaId || "");
+  }, [pid, initialAreaId]);
 
   const sheet = preview?.sheets.find((s) => s.name === sheetName) || preview?.sheets[0];
   const fields: ImportField[] = preview?.fields || [];
@@ -117,8 +132,8 @@ export default function ImportWizard({
       return;
     }
     const mapping = invertMapping(headerMap);
-    if (!mapping.name && !mapping.hostname && !mapping.serial) {
-      setError("Map at least Device name, Hostname, or Serial so rows can be created.");
+    if (!mapping.name && !mapping.hostname && !mapping.serial && !mapping.area && !mapping.row && !mapping.rack) {
+      setError("Map a device field (name, hostname, or serial) or layout fields (area, row/aisle, rack).");
       return;
     }
     setBusy(true);
@@ -129,6 +144,7 @@ export default function ImportWizard({
         orientation,
         header_index: headerIndex,
         mapping,
+        default_area_id: defaultAreaId || undefined,
       });
       invalidateCatalog();
       onImported(Number(pid), result);
@@ -149,8 +165,9 @@ export default function ImportWizard({
           </button>
         </div>
         <p className="muted">
-          Choose an existing project, then map spreadsheet columns (or rows) onto device fields. Records without a name,
-          hostname, or serial are skipped.
+          Choose a project, then map spreadsheet columns (or rows) onto device and layout fields. If the sheet has Area
+          and Row/Aisle columns, the import creates those records and fills the area even when some lines have no
+          device. CSV, XLSX, and ODS are supported.
         </p>
         {error && <div className="error">{error}</div>}
 
@@ -168,14 +185,28 @@ export default function ImportWizard({
             </select>
           </label>
           <label className="field">
-            <span>CSV or XLSX file</span>
+            <span>CSV, XLSX, or ODS file</span>
             <input
               type="file"
-              accept=".csv,.xlsx,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+              accept=".csv,.xlsx,.ods,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.oasis.opendocument.spreadsheet,text/csv"
               onChange={(e) => onFile(e.target.files?.[0])}
             />
           </label>
         </div>
+
+        {pid !== "" && areas.length > 0 && (
+          <label className="field">
+            <span>Default area (used when the sheet has rows/aisles but no area column)</span>
+            <select value={defaultAreaId} onChange={(e) => setDefaultAreaId(e.target.value ? Number(e.target.value) : "")}>
+              <option value="">Create areas from the spreadsheet</option>
+              {areas.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         {preview && sheet && (
           <>

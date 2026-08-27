@@ -9,16 +9,19 @@ export default function RelocateDialog({
   mode,
   projectId,
   entityId,
+  entityIds,
   onClose,
   onDone,
 }: {
   kind: RelocateKind;
   mode: Mode;
   projectId: number;
-  entityId: number;
+  entityId?: number;
+  entityIds?: number[];
   onClose: () => void;
   onDone: () => void;
 }) {
+  const ids = entityIds?.length ? entityIds : entityId ? [entityId] : [];
   const [plist, setPlist] = useState<Project[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
   const [rows, setRows] = useState<AisleRow[]>([]);
@@ -83,14 +86,16 @@ export default function RelocateDialog({
     if (kind === "rack" || kind === "device") body.target_row_id = targetRow ? Number(targetRow) : null;
     if (kind === "device") body.target_rack_id = targetRack ? Number(targetRack) : null;
     try {
-      if (kind === "area") {
-        await (mode === "copy" ? projects.copyArea : projects.moveArea)(projectId, entityId, body);
-      } else if (kind === "row") {
-        await (mode === "copy" ? projects.copyRow : projects.moveRow)(projectId, entityId, body);
-      } else if (kind === "rack") {
-        await (mode === "copy" ? projects.copyRack : projects.moveRack)(projectId, entityId, body);
-      } else {
-        await (mode === "copy" ? projects.copyDevice : projects.moveDevice)(projectId, entityId, body);
+      for (const id of ids) {
+        if (kind === "area") {
+          await (mode === "copy" ? projects.copyArea : projects.moveArea)(projectId, id, body);
+        } else if (kind === "row") {
+          await (mode === "copy" ? projects.copyRow : projects.moveRow)(projectId, id, body);
+        } else if (kind === "rack") {
+          await (mode === "copy" ? projects.copyRack : projects.moveRack)(projectId, id, body);
+        } else {
+          await (mode === "copy" ? projects.copyDevice : projects.moveDevice)(projectId, id, body);
+        }
       }
       onDone();
       onClose();
@@ -101,7 +106,7 @@ export default function RelocateDialog({
     }
   }
 
-  const title = `${mode === "copy" ? "Copy" : "Move"} ${kind} to another project`;
+  const title = `${mode === "copy" ? "Copy" : "Move"} ${ids.length > 1 ? `${ids.length} ${kind}s` : kind} to another project`;
 
   return (
     <div className="overlay" role="dialog" aria-modal="true">
@@ -196,7 +201,7 @@ export default function RelocateDialog({
             <span>Include devices</span>
           </label>
         )}
-        <button className="btn primary block" disabled={busy}>
+        <button className="btn primary block" disabled={busy || !ids.length}>
           {busy ? "Working…" : mode === "copy" ? "Copy" : "Move"}
         </button>
       </form>

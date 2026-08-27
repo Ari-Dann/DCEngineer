@@ -7,10 +7,11 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import WriteUser, get_current_user
+from app.deps import AdminUser, ImportUser, WriteUser, get_current_user
 from app.models import (
     AisleRow,
     Area,
+    Attachment,
     BackupProcess,
     Cable,
     CapacityNote,
@@ -170,9 +171,14 @@ def get_project(project_id: int, db: Session = Depends(get_db), _: User = Depend
 
 
 @projects_router.patch("/{project_id}", response_model=ProjectOut)
-def update_project(project_id: int, body: ProjectIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)):
+def update_project(
+    project_id: int, body: ProjectIn, db: Session = Depends(get_db), user: User = Depends(WriteUser)
+):
     project = _get_project(db, project_id)
-    _apply(project, body.model_dump())
+    data = body.model_dump()
+    if data.get("name") != project.name and user.role != "admin":
+        raise HTTPException(403, "Only an admin can rename a project")
+    _apply(project, data)
     project.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(project)
@@ -180,8 +186,29 @@ def update_project(project_id: int, body: ProjectIn, db: Session = Depends(get_d
 
 
 @projects_router.delete("/{project_id}")
-def delete_project(project_id: int, db: Session = Depends(get_db), _: User = Depends(WriteUser)):
+def delete_project(project_id: int, db: Session = Depends(get_db), _: User = Depends(AdminUser)):
     project = _get_project(db, project_id)
+    area_ids = [row[0] for row in db.query(Area.id).filter(Area.project_id == project_id).all()]
+    row_ids = [row[0] for row in db.query(AisleRow.id).filter(AisleRow.project_id == project_id).all()]
+    rack_ids = [row[0] for row in db.query(Rack.id).filter(Rack.project_id == project_id).all()]
+    device_ids = [row[0] for row in db.query(Device.id).filter(Device.project_id == project_id).all()]
+    entity_ids = {
+        "project": [project_id],
+        "area": area_ids,
+        "row": row_ids,
+        "rack": rack_ids,
+        "device": device_ids,
+    }
+    for entity_type, ids in entity_ids.items():
+        if not ids:
+            continue
+        db.query(Attachment).filter(Attachment.entity_type == entity_type, Attachment.entity_id.in_(ids)).delete(
+            synchronize_session=False
+        )
+    db.query(Device).filter(Device.project_id == project_id).delete(synchronize_session=False)
+    db.query(Cable).filter(Cable.project_id == project_id).delete(synchronize_session=False)
+    db.query(Handoff).filter(Handoff.project_id == project_id).delete(synchronize_session=False)
+    db.query(Checklist).filter(Checklist.project_id == project_id).delete(synchronize_session=False)
     db.delete(project)
     db.commit()
     return {"ok": True}
@@ -537,7 +564,7 @@ async def preview_inventory_import(
     sheet: Optional[str] = Form(None),
     orientation: Optional[str] = Form(None),
     header_index: Optional[int] = Form(None),
-    _: User = Depends(get_current_user),
+    _: User = Depends(ImportUser),
 ):
     data = await file.read()
     if not data:
@@ -562,8 +589,9 @@ async def import_inventory(
     orientation: Optional[str] = Form(None),
     header_index: Optional[int] = Form(None),
     mapping: Optional[str] = Form(None),
+    default_area_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
-    user: User = Depends(WriteUser),
+    user: User = Depends(ImportUser),
 ):
     _get_project(db, project_id)
     data = await file.read()
@@ -580,6 +608,7 @@ async def import_inventory(
             orientation=orientation or None,
             header_index=header_index,
             mapping=mapping,
+            default_area_id=default_area_id,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
