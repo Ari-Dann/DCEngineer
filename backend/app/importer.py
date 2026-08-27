@@ -1,4 +1,4 @@
-"""Import devices (and missing racks) from CSV or XLSX workbooks."""
+"""Import devices and layout (areas / rows / racks) from CSV, XLSX, or ODS."""
 
 from __future__ import annotations
 
@@ -6,15 +6,17 @@ import csv
 import io
 import json
 import re
+import zipfile
 from datetime import date, datetime
 from typing import Any
+from xml.etree import ElementTree as ET
 
 from openpyxl import load_workbook
 from sqlalchemy.orm import Session
 
 from app.catalog import DEVICE_TYPES, IMPORT_FIELDS, learn_values
 from app.layout import apply_row_to_rack, resolve_or_create_row
-from app.models import Area, Device, Rack
+from app.models import AisleRow, Area, Device, Rack
 
 HEADER_MAP = {
     "name": ("name", "device", "device name", "device_name", "unit", "label", "hostname/device"),
@@ -98,12 +100,72 @@ def _sheets_from_xlsx(data: bytes) -> list[tuple[str, list[list[str]]]]:
     return out
 
 
+_ODS_NS = {
+    "office": "urn:oasis:names:tc:opendocument:xmlns:office:1.0",
+    "table": "urn:oasis:names:tc:opendocument:xmlns:table:1.0",
+    "text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0",
+}
+
+
+def _is_ods(data: bytes) -> bool:
+    if data[:2] != b"PK":
+        return False
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            names = set(zf.namelist())
+            if "mimetype" in names:
+                mime = zf.read("mimetype").decode("utf-8", errors="ignore")
+                if "opendocument.spreadsheet" in mime:
+                    return True
+            return "content.xml" in names and "[Content_Types].xml" not in names
+    except zipfile.BadZipFile:
+        return False
+
+
+def _ods_cell_text(cell: ET.Element) -> str:
+    value = cell.get(f"{{{_ODS_NS['office']}}}value")
+    if value:
+        return _norm(value)
+    parts = ["".join(p.itertext()) for p in cell.findall("text:p", _ODS_NS)]
+    return _norm("\n".join(parts) if parts else "")
+
+
+def _sheets_from_ods(data: bytes) -> list[tuple[str, list[list[str]]]]:
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        root = ET.fromstring(zf.read("content.xml"))
+    out: list[tuple[str, list[list[str]]]] = []
+    for table in root.findall(".//table:table", _ODS_NS):
+        name = table.get(f"{{{_ODS_NS['table']}}}name") or "Sheet1"
+        grid: list[list[str]] = []
+        for row_el in table.findall("table:table-row", _ODS_NS):
+            cells: list[str] = []
+            for cell in row_el.findall("table:table-cell", _ODS_NS):
+                text = _ods_cell_text(cell)
+                repeat = min(int(cell.get(f"{{{_ODS_NS['table']}}}number-columns-repeated") or 1), 256)
+                cells.extend([text] * repeat)
+            while cells and not cells[-1]:
+                cells.pop()
+            row_repeat = int(row_el.get(f"{{{_ODS_NS['table']}}}number-rows-repeated") or 1)
+            if not any(cells):
+                continue
+            for _ in range(min(row_repeat, 50)):
+                grid.append(cells)
+        if grid:
+            out.append((name, grid))
+    return out
+
+
 def parse_workbook(filename: str, data: bytes) -> list[tuple[str, list[list[str]]]]:
     name = (filename or "").lower()
     if name.endswith(".xls"):
-        raise ValueError("Legacy .xls is not supported. Save as .xlsx or .csv and try again.")
+        raise ValueError("Legacy .xls is not supported. Save as .xlsx, .ods, or .csv and try again.")
     if name.endswith(".csv") or name.endswith(".txt"):
         return [(filename or "Sheet1", _grid_from_csv(data))]
+    if name.endswith(".ods") or _is_ods(data):
+        sheets = _sheets_from_ods(data)
+        if not sheets:
+            raise ValueError("ODS workbook contained no tables.")
+        return sheets
     if name.endswith(".xlsx") or data[:2] == b"PK":
         return _sheets_from_xlsx(data)
     return [(filename or "Sheet1", _grid_from_csv(data))]
@@ -297,6 +359,22 @@ def _parse_mapping(raw: str | dict | None) -> dict[str, int] | None:
     return out or None
 
 
+def _empty_result(errors: list[str] | None = None) -> dict:
+    return {
+        "created": 0,
+        "updated": 0,
+        "racks_created": 0,
+        "areas_created": 0,
+        "rows_created": 0,
+        "skipped": 0,
+        "rows": 0,
+        "errors": errors or [],
+        "names": [],
+        "sheet": "",
+        "orientation": "rows",
+    }
+
+
 def import_devices(
     db: Session,
     project_id: int,
@@ -308,20 +386,11 @@ def import_devices(
     orientation: str | None = None,
     header_index: int | None = None,
     mapping: dict[str, int] | str | None = None,
+    default_area_id: int | None = None,
 ) -> dict:
     parsed = parse_workbook(filename, data)
     if not parsed:
-        return {
-            "created": 0,
-            "updated": 0,
-            "racks_created": 0,
-            "skipped": 0,
-            "rows": 0,
-            "errors": ["File contained no rows"],
-            "names": [],
-            "sheet": "",
-            "orientation": "rows",
-        }
+        return _empty_result(["File contained no rows"])
 
     chosen = sheet or pick_sheet([describe_sheet(n, g) for n, g in parsed])
     grid = next((g for n, g in parsed if n == chosen), parsed[0][1])
@@ -335,19 +404,62 @@ def import_devices(
     created = 0
     updated = 0
     racks_created = 0
+    areas_created = 0
+    rows_created = 0
     skipped = 0
     errors: list[str] = []
     names: list[str] = []
     rack_cache: dict[str, Rack] = {
         r.name.lower(): r for r in db.query(Rack).filter(Rack.project_id == project_id).all()
     }
+    area_cache: dict[str, Area] = {
+        a.name.lower(): a for a in db.query(Area).filter(Area.project_id == project_id).all()
+    }
+    existing_row_ids = {
+        r.id for r in db.query(AisleRow).filter(AisleRow.project_id == project_id).all()
+    }
+    default_area = None
+    if default_area_id:
+        default_area = db.get(Area, default_area_id)
+        if not default_area or default_area.project_id != project_id:
+            return _empty_result(["Default area was not found in this project"])
+
+    def ensure_area(area_name: str) -> Area | None:
+        nonlocal areas_created
+        label = (area_name or "").strip()
+        if not label:
+            return default_area
+        key = label.lower()
+        area = area_cache.get(key)
+        if area:
+            return area
+        area = Area(project_id=project_id, name=label)
+        db.add(area)
+        db.flush()
+        area_cache[key] = area
+        areas_created += 1
+        return area
 
     for index, row in enumerate(rows, start=2):
         name = row.get("name") or row.get("hostname") or row.get("serial")
-        if not name:
+        area_name = (row.get("area") or "").strip()
+        row_name = (row.get("row") or "").strip()
+        rack_name = (row.get("rack") or "").strip()
+        if not name and not area_name and not row_name and not rack_name:
             skipped += 1
             continue
-        rack_name = row.get("rack")
+
+        area = ensure_area(area_name)
+        area_id = area.id if area else None
+        aisle = None
+        if row_name:
+            aisle = resolve_or_create_row(db, project_id, row_label=row_name, area_id=area_id)
+            if aisle and aisle.id not in existing_row_ids:
+                existing_row_ids.add(aisle.id)
+                rows_created += 1
+            if aisle and area_id and aisle.area_id is None:
+                aisle.area_id = area_id
+
         rack = None
         if rack_name:
             key = rack_name.lower()
@@ -358,26 +470,10 @@ def import_devices(
                 db.flush()
                 rack_cache[key] = rack
                 racks_created += 1
-            area_name = row.get("area", "").strip()
-            row_name = row.get("row", "").strip()
-            area = None
-            if area_name:
-                area = (
-                    db.query(Area)
-                    .filter(Area.project_id == project_id, Area.name == area_name)
-                    .first()
-                )
-                if not area:
-                    area = Area(project_id=project_id, name=area_name)
-                    db.add(area)
-                    db.flush()
-            aisle = resolve_or_create_row(
-                db,
-                project_id,
-                row_label=row_name,
-                area_id=area.id if area else rack.area_id,
-            )
-            apply_row_to_rack(rack, aisle, area.id if area else None)
+            apply_row_to_rack(rack, aisle, area_id)
+
+        if not name:
+            continue
 
         ru_start = _int(row.get("ru_start", ""))
         ru_end = _int(row.get("ru_end", ""))
@@ -442,6 +538,8 @@ def import_devices(
         "created": created,
         "updated": updated,
         "racks_created": racks_created,
+        "areas_created": areas_created,
+        "rows_created": rows_created,
         "skipped": skipped,
         "rows": len(rows),
         "errors": errors[:20],

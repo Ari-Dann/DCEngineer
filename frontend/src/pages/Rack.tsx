@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AisleRow, Area, Device, Elevation, PDU, Rack, downloadAuth, layoutPath, projects, uploadPhotos } from "../api";
 import {
   DeviceDraft,
@@ -12,10 +12,12 @@ import {
 import PhotoGallery from "../components/PhotoGallery";
 import RelocateDialog, { RelocateKind } from "../components/RelocateDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { parseIdParam, projectHref } from "../nav";
 
 export default function RackPage() {
   const { id, rackId } = useParams();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const pid = Number(id);
   const rid = Number(rackId);
   const [elev, setElev] = useState<Elevation | null>(null);
@@ -29,7 +31,7 @@ export default function RackPage() {
   const [pduName, setPduName] = useState("PDU-A");
   const [editing, setEditing] = useState<Device | null>(null);
   const [adding, setAdding] = useState<DeviceDraft | null>(null);
-  const [relocate, setRelocate] = useState<{ kind: RelocateKind; id: number; mode: "copy" | "move" } | null>(null);
+  const [relocate, setRelocate] = useState<{ kind: RelocateKind; ids: number[]; mode: "copy" | "move" } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ kind: "rack" | "device"; id: number; name: string; detail: string } | null>(
     null,
   );
@@ -79,10 +81,36 @@ export default function RackPage() {
 
   if (!elev) return <div className="page">{error || "Loading…"}</div>;
 
+  const backArea = parseIdParam(params.get("area")) || elev.rack.area_id || "";
+  const backRow = parseIdParam(params.get("row")) || elev.rack.row_id || "";
+  const backRowName = aisleRows.find((r) => r.id === backRow)?.name || elev.rack.row_label || "row";
+  const backHref = projectHref(pid, { tab: backRow ? "racks" : "rows", area: backArea, row: backRow });
+
   return (
     <div className="page">
+      <nav className="crumb">
+        <Link to="/projects">Projects</Link>
+        <span className="muted">/</span>
+        <Link to={projectHref(pid)}>Project</Link>
+        {backArea ? (
+          <>
+            <span className="muted">/</span>
+            <Link to={projectHref(pid, { tab: "rows", area: backArea })}>
+              {areas.find((a) => a.id === backArea)?.name || "Area"}
+            </Link>
+          </>
+        ) : null}
+        {backRow ? (
+          <>
+            <span className="muted">/</span>
+            <Link to={backHref}>{backRowName}</Link>
+          </>
+        ) : null}
+        <span className="muted">/</span>
+        <span className="here">{elev.rack.name}</span>
+      </nav>
       <p>
-        <Link to={`/projects/${pid}`}>← {elev.rack.name}</Link>
+        <Link to={backHref}>← {backRow ? backRowName : elev.rack.name}</Link>
       </p>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
@@ -137,14 +165,14 @@ export default function RackPage() {
               <button
                 type="button"
                 className="btn"
-                onClick={() => setRelocate({ kind: "rack", id: rid, mode: "copy" })}
+                onClick={() => setRelocate({ kind: "rack", ids: [rid], mode: "copy" })}
               >
                 Copy
               </button>
               <button
                 type="button"
                 className="btn"
-                onClick={() => setRelocate({ kind: "rack", id: rid, mode: "move" })}
+                onClick={() => setRelocate({ kind: "rack", ids: [rid], mode: "move" })}
               >
                 Move
               </button>
@@ -265,7 +293,7 @@ export default function RackPage() {
             load();
           }}
           onRelocate={(mode) => {
-            setRelocate({ kind: "device", id: editing.id, mode });
+            setRelocate({ kind: "device", ids: [editing.id], mode });
             setEditing(null);
           }}
           onDelete={() => {
@@ -284,7 +312,7 @@ export default function RackPage() {
           kind={relocate.kind}
           mode={relocate.mode}
           projectId={pid}
-          entityId={relocate.id}
+          entityIds={relocate.ids}
           onClose={() => setRelocate(null)}
           onDone={load}
         />
@@ -297,7 +325,7 @@ export default function RackPage() {
           onConfirm={async () => {
             if (pendingDelete.kind === "rack") {
               await projects.deleteRack(pid, pendingDelete.id);
-              navigate(`/projects/${pid}?tab=racks`);
+              navigate(backHref);
             } else {
               await projects.deleteDevice(pid, pendingDelete.id);
               load();

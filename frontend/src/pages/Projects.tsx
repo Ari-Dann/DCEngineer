@@ -1,7 +1,9 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ImportResult, Project, projects } from "../api";
+import { ImportResult, Project, getSession, projects } from "../api";
 import ImportWizard from "../components/ImportWizard";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { PromptDialog } from "../components/PromptDialog";
 
 const empty = {
   name: "",
@@ -27,11 +29,16 @@ const empty = {
 
 export default function Projects() {
   const navigate = useNavigate();
+  const role = getSession()?.role;
+  const isAdmin = role === "admin";
+  const canImport = role === "admin" || role === "engineer";
   const [rows, setRows] = useState<Project[]>([]);
   const [open, setOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [form, setForm] = useState(empty);
   const [error, setError] = useState("");
+  const [renaming, setRenaming] = useState<Project | null>(null);
+  const [deleting, setDeleting] = useState<Project | null>(null);
 
   function load() {
     projects.list().then(setRows).catch((e) => setError(String(e.message || e)));
@@ -60,9 +67,11 @@ export default function Projects() {
           <p>Phase 1 workbook shell through Phase 4 delivery.</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn" onClick={() => setImportOpen(true)} disabled={rows.length === 0}>
-            Import inventory
-          </button>
+          {canImport && (
+            <button className="btn" onClick={() => setImportOpen(true)} disabled={rows.length === 0}>
+              Import inventory
+            </button>
+          )}
           <button className="btn primary" onClick={() => setOpen((v) => !v)}>
             {open ? "Close" : "New project"}
           </button>
@@ -109,13 +118,25 @@ export default function Projects() {
       )}
       <div className="grid">
         {rows.map((p) => (
-          <Link className="card project-card" key={p.id} to={`/projects/${p.id}`}>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <h3>{p.name}</h3>
-              <span className={`badge ${p.status}`}>{p.status}</span>
-            </div>
-            <div className="muted">{p.customer} · {p.site_name || "no site"} · rev {p.revision}</div>
-          </Link>
+          <div className="card project-card" key={p.id}>
+            <Link to={`/projects/${p.id}`} style={{ color: "inherit" }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <h3>{p.name}</h3>
+                <span className={`badge ${p.status}`}>{p.status}</span>
+              </div>
+              <div className="muted">{p.customer} · {p.site_name || "no site"} · rev {p.revision}</div>
+            </Link>
+            {isAdmin && (
+              <div className="project-card-actions">
+                <button type="button" className="btn" onClick={() => setRenaming(p)}>
+                  Rename
+                </button>
+                <button type="button" className="btn danger" onClick={() => setDeleting(p)}>
+                  Delete
+                </button>
+              </div>
+            )}
+          </div>
         ))}
         {rows.length === 0 && <div className="card muted">No projects yet. Create the RBI workbook shell to begin Phase 1.</div>}
       </div>
@@ -128,6 +149,29 @@ export default function Projects() {
             const qs = new URLSearchParams({ tab: "devices" });
             if (result.created + result.updated === 0) qs.set("import", "empty");
             navigate(`/projects/${pid}?${qs.toString()}`);
+          }}
+        />
+      )}
+      {renaming && (
+        <PromptDialog
+          title={`Rename project “${renaming.name}”?`}
+          label="Project name"
+          initial={renaming.name}
+          onClose={() => setRenaming(null)}
+          onSave={async (name) => {
+            await projects.update(renaming.id, { ...renaming, name });
+            load();
+          }}
+        />
+      )}
+      {deleting && (
+        <ConfirmDialog
+          title={`Delete project “${deleting.name}”?`}
+          message="This removes the entire project: areas, rows, racks, devices, cables, checklists, and hand-offs."
+          onClose={() => setDeleting(null)}
+          onConfirm={async () => {
+            await projects.delete(deleting.id);
+            load();
           }}
         />
       )}
