@@ -111,6 +111,14 @@ p { margin: 0 0 0.75rem; color: var(--muted); }
   border: 1px solid var(--border); background: var(--bg); width: 100%;
 }
 .field textarea { min-height: 88px; resize: vertical; }
+.viewfield {
+  min-height: 44px; padding: 10px 12px; border-radius: 10px;
+  border: 1px dashed var(--border); background: var(--bg-elev);
+  display: flex; align-items: center;
+}
+.unit-toggle { display: flex; gap: 6px; }
+.unit-toggle .btn { min-height: 44px; min-width: 52px; }
+.unit-toggle .btn.on { outline: 2px solid var(--accent); }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .row.three { grid-template-columns: 1fr 1fr 1fr; }
 @media (max-width: 700px) { .row, .row.three { grid-template-columns: 1fr; } }

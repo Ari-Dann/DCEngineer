@@ -1230,3 +1230,94 @@ def test_import_empty_cells_do_not_blank_device_fields(client, auth):
     assert got["hostname"] == "core-keep-host"
     assert got["rack_id"] == rack["id"]
 
+
+def test_import_parses_device_name_into_blank_identity_fields(client, auth):
+    project = client.post("/api/projects", headers=auth, json={"name": "Name parse"}).json()
+    pid = project["id"]
+    csv_body = (
+        "name,serial,rack\n"
+        "Cisco Catalyst 3560G Ethernet Switch,SN-CAT,A01\n"
+        "Floor Widget 12,SN-UNK,A01\n"
+        "Cisco Catalyst 9300-48P Switch,SN-9300,A01\n"
+    )
+    imported = client.post(
+        f"/api/projects/{pid}/import",
+        headers=auth,
+        files={"file": ("names.csv", csv_body.encode(), "text/csv")},
+    )
+    assert imported.status_code == 200, imported.text
+    devices = {d["serial"]: d for d in client.get(f"/api/projects/{pid}/devices", headers=auth).json()}
+    cat = devices["SN-CAT"]
+    assert cat["vendor"] == "Cisco"
+    assert cat["model"] == "Catalyst 3560G"
+    assert cat["device_type"] == "switch"
+    unk = devices["SN-UNK"]
+    assert unk["vendor"] == ""
+    assert unk["model"] == ""
+    assert unk["device_type"] == "server"
+    known = devices["SN-9300"]
+    assert known["vendor"] == "Cisco"
+    assert known["model"] == "Catalyst 9300-48P"
+    assert known["device_type"] == "switch"
+
+
+def test_import_does_not_overwrite_provided_or_existing_identity(client, auth):
+    project = client.post("/api/projects", headers=auth, json={"name": "Keep identity"}).json()
+    pid = project["id"]
+    rack = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "A01", "row_label": "A", "ru_height": 42},
+    ).json()
+    device = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={
+            "name": "core-keep",
+            "rack_id": rack["id"],
+            "vendor": "Juniper",
+            "model": "EX4300",
+            "serial": "SN-ID",
+            "device_type": "switch",
+        },
+    ).json()
+    csv_body = (
+        "name,serial,rack,vendor,model,type\n"
+        "Cisco Catalyst 3560G Ethernet Switch,SN-ID,A01,,,\n"
+        "core-new,SN-NEW,A01,Arista,,firewall\n"
+    )
+    imported = client.post(
+        f"/api/projects/{pid}/import",
+        headers=auth,
+        files={"file": ("keep.csv", csv_body.encode(), "text/csv")},
+    )
+    assert imported.status_code == 200, imported.text
+    got = client.get(f"/api/projects/{pid}/devices/{device['id']}", headers=auth).json()
+    assert got["vendor"] == "Juniper"
+    assert got["model"] == "EX4300"
+    assert got["device_type"] == "switch"
+    created = next(d for d in client.get(f"/api/projects/{pid}/devices", headers=auth).json() if d["serial"] == "SN-NEW")
+    assert created["vendor"] == "Arista"
+    assert created["model"] == ""
+    assert created["device_type"] == "firewall"
+
+
+def test_device_power_draw_unit_roundtrip(client, auth):
+    project = client.post("/api/projects", headers=auth, json={"name": "Power"}).json()
+    pid = project["id"]
+    device = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={"name": "pdu-1", "power_draw_watts": 2500, "power_draw_unit": "kW", "device_type": "pdu"},
+    ).json()
+    assert device["power_draw_watts"] == 2500
+    assert device["power_draw_unit"] == "kW"
+    patched = client.patch(
+        f"/api/projects/{pid}/devices/{device['id']}",
+        headers=auth,
+        json={"power_draw_watts": 400, "power_draw_unit": "W"},
+    ).json()
+    assert patched["power_draw_watts"] == 400
+    assert patched["power_draw_unit"] == "W"
+
+

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 DEVICE_TYPES = [
     "server",
     "switch",
@@ -239,6 +241,91 @@ RACK_HEIGHT_PRESETS = [42, 45, 47, 48, 52, 58]
 
 SKIP_VALUES = {"", "other", "n/a", "na", "none", "unknown", "-", "—"}
 
+# Common letterheads that map onto a catalog vendor. Prefix-only; never guessed from mid-string.
+VENDOR_ALIASES = {
+    "cisco systems": "Cisco",
+    "cisco systems inc": "Cisco",
+    "cisco systems, inc": "Cisco",
+    "juniper networks": "Juniper",
+    "arista networks": "Arista",
+    "dell emc": "Dell",
+    "dell technologies": "Dell",
+    "hewlett packard enterprise": "HPE Aruba",
+    "hewlett-packard enterprise": "HPE Aruba",
+    "hpe aruba": "HPE Aruba",
+    "hpe": "HPE Aruba",
+    "aruba": "HPE Aruba",
+    "palo alto": "Palo Alto Networks",
+    "palo alto networks": "Palo Alto Networks",
+    "fortinet inc": "Fortinet",
+    "ubiquiti networks": "Ubiquiti",
+    "netgear inc": "Netgear",
+    "supermicro computer": "Supermicro",
+    "lenovo emc": "Lenovo",
+    "nvidia networking": "NVIDIA",
+    "mellanox": "NVIDIA",
+    "american power conversion": "APC",
+    "check point software": "Check Point",
+    "checkpoint": "Check Point",
+}
+
+_TYPE_KEYWORDS = (
+    ("ethernet switch", "switch"),
+    ("gigabit switch", "switch"),
+    ("switches", "switch"),
+    ("switch", "switch"),
+    ("routers", "router"),
+    ("router", "router"),
+    ("firewalls", "firewall"),
+    ("firewall", "firewall"),
+    ("storage array", "storage"),
+    ("storage", "storage"),
+    ("servers", "server"),
+    ("server", "server"),
+    ("pdus", "pdu"),
+    ("pdu", "pdu"),
+    ("uninterruptible power supply", "ups"),
+    ("ups", "ups"),
+)
+
+_FILLER_WORDS = {
+    "ethernet",
+    "gigabit",
+    "network",
+    "networking",
+    "managed",
+    "unmanaged",
+    "poe",
+    "poe+",
+    "plus",
+    "layer",
+    "l2",
+    "l3",
+    "series",
+    "appliance",
+    "device",
+    "chassis",
+    "modular",
+    "stackable",
+    "fibre",
+    "fiber",
+    "optic",
+    "optical",
+    "the",
+    "and",
+    "with",
+    "for",
+    "datacenter",
+    "data",
+    "center",
+    "centre",
+    "enterprise",
+    "commercial",
+    "industrial",
+    "rackmount",
+    "rack-mount",
+}
+
 
 def _clean(value: str | None) -> str:
     return (value or "").strip()
@@ -375,6 +462,176 @@ def catalog_payload(db=None) -> dict:
         "other_label": "Other",
         "fields": IMPORT_FIELDS,
     }
+
+
+def identity_index(db=None) -> dict:
+    """Vendors, models, and types the importer may copy into blank identity fields."""
+    payload = catalog_payload(db)
+    vendors: list[tuple[str, list[str]]] = []
+    prefixes: list[tuple[str, str]] = []
+    families: set[str] = set()
+    for entry in payload["vendors"]:
+        name = _clean(entry.get("name"))
+        if not name or name.lower() in SKIP_VALUES:
+            continue
+        models = [m for m in entry.get("models") or [] if _is_custom(m)]
+        vendors.append((name, models))
+        prefixes.append((name.lower(), name))
+        for model in models:
+            token = model.split()[0]
+            if token and token.lower() not in SKIP_VALUES and not token.isdigit():
+                families.add(token.lower())
+    known_lower = {name.lower() for name, _ in vendors}
+    for alias, canonical in VENDOR_ALIASES.items():
+        target = next((name for name, _ in vendors if name.lower() == canonical.lower()), None)
+        if target and alias.lower() not in known_lower:
+            prefixes.append((alias.lower(), target))
+    prefixes.sort(key=lambda item: len(item[0]), reverse=True)
+    types = [t for t in payload["device_types"] if _is_custom(t)]
+    return {"vendors": vendors, "prefixes": prefixes, "families": families, "types": types}
+
+
+def _starts_with_prefix(text_lower: str, prefix: str) -> bool:
+    if not prefix or not text_lower.startswith(prefix):
+        return False
+    if len(text_lower) == len(prefix):
+        return True
+    return not text_lower[len(prefix)].isalnum()
+
+
+def _word_in(text_lower: str, phrase: str) -> bool:
+    if not phrase:
+        return False
+    return re.search(rf"(?<![a-z0-9]){re.escape(phrase.lower())}(?![a-z0-9])", text_lower) is not None
+
+
+def _infer_type(text_lower: str, custom_types: list[str] | None = None) -> str:
+    for phrase, dtype in _TYPE_KEYWORDS:
+        if _word_in(text_lower, phrase):
+            return dtype
+    extras = sorted((custom_types or []), key=len, reverse=True)
+    skip = {t for _, t in _TYPE_KEYWORDS} | SKIP_VALUES
+    for dtype in extras:
+        if dtype.lower() in skip or (len(dtype) < 3 and dtype.lower() not in {"pdu", "ups"}):
+            continue
+        if _word_in(text_lower, dtype):
+            return dtype
+    return ""
+
+
+def _longest_known_model(text: str, models: list[str]) -> str:
+    lower = text.lower()
+    best = ""
+    for model in models:
+        needle = model.lower()
+        if not needle or needle in SKIP_VALUES:
+            continue
+        idx = lower.find(needle)
+        if idx < 0:
+            continue
+        before_ok = idx == 0 or not lower[idx - 1].isalnum()
+        after = idx + len(needle)
+        after_ok = after == len(lower) or not lower[after].isalnum()
+        if before_ok and after_ok and len(model) > len(best):
+            best = model
+    return best
+
+
+def _strip_identity_noise(text: str, dtype: str) -> str:
+    drop = {word.lower() for word in _FILLER_WORDS}
+    if dtype:
+        drop.add(dtype.lower())
+        drop.update(phrase.lower() for phrase, mapped in _TYPE_KEYWORDS if mapped == dtype)
+    tokens = [tok for tok in re.split(r"\s+", text.strip()) if tok]
+    kept = []
+    for token in tokens:
+        bare = token.lower().strip(".,()/[]{}")
+        if bare in drop:
+            continue
+        kept.append(token)
+    return " ".join(kept).strip(" -,/")
+
+
+def _acceptable_inferred_model(value: str, families: set[str]) -> bool:
+    if not _is_custom(value):
+        return False
+    tokens = value.split()
+    if not tokens:
+        return False
+    has_digit = any(any(ch.isdigit() for ch in token) for token in tokens)
+    has_family = any(token.lower() in families for token in tokens)
+    return has_digit or (has_family and len(tokens) >= 2)
+
+
+def infer_identity(name: str, db=None, index: dict | None = None) -> dict[str, str]:
+    """Fill vendor / model / type from a device name when those fields are blank.
+
+    Conservative: vendor must be a known (or user-defined) prefix; type must be a
+    standard keyword or a user-defined type word; model must match a known model
+    or a leftover product string after a known vendor (family name and/or digits).
+    """
+    text = _clean(name)
+    if not text:
+        return {}
+    lookup = index or identity_index(db)
+    lower = text.lower()
+    out: dict[str, str] = {}
+
+    vendor = ""
+    prefix_len = 0
+    for prefix, canonical in lookup["prefixes"]:
+        if _starts_with_prefix(lower, prefix):
+            vendor = canonical
+            prefix_len = len(prefix)
+            break
+    rest = text[prefix_len:].strip(" \t-–—,") if vendor else text
+    if vendor:
+        out["vendor"] = vendor
+
+    dtype = _infer_type(lower, lookup.get("types") or [])
+    if dtype:
+        out["device_type"] = dtype
+
+    models: list[str] = []
+    if vendor:
+        for existing, vendor_models in lookup["vendors"]:
+            if existing.lower() == vendor.lower():
+                models = vendor_models
+                break
+    known = _longest_known_model(text, models) if models else ""
+    if known:
+        out["model"] = known
+    elif vendor:
+        leftover = _strip_identity_noise(rest, dtype)
+        if _acceptable_inferred_model(leftover, lookup.get("families") or set()):
+            out["model"] = leftover[:128]
+    return out
+
+
+def remember_identity(index: dict, *, vendor: str = "", model: str = "", device_type: str = "") -> None:
+    """Keep an in-memory identity index aligned with values learned during import."""
+    vendor = _clean(vendor)
+    model = _clean(model)
+    device_type = _clean(device_type)
+    if _is_custom(vendor):
+        models: list[str] | None = None
+        for name, vendor_models in index["vendors"]:
+            if name.lower() == vendor.lower():
+                models = vendor_models
+                vendor = name
+                break
+        if models is None:
+            models = []
+            index["vendors"].append((vendor, models))
+            index["prefixes"].append((vendor.lower(), vendor))
+            index["prefixes"].sort(key=lambda item: len(item[0]), reverse=True)
+        if _is_custom(model) and not any(existing.lower() == model.lower() for existing in models):
+            models.append(model)
+            token = model.split()[0]
+            if token and token.lower() not in SKIP_VALUES and not token.isdigit():
+                index["families"].add(token.lower())
+    if _is_custom(device_type) and not any(existing.lower() == device_type.lower() for existing in index["types"]):
+        index["types"].append(device_type)
 
 
 # Shared with the importer so mapping UI and capture dropdowns stay aligned.

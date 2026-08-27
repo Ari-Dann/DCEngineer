@@ -16,6 +16,7 @@ import {
   layoutPath,
   projects,
 } from "../api";
+import { formatPowerWatts, rackIdsForArea, rackIdsForRow, sumPowerWatts } from "../power";
 import { DeviceEditorModal, RackHeightField } from "../components/DeviceEditor";
 import ImportWizard from "../components/ImportWizard";
 import LocatePanel from "../components/LocatePanel";
@@ -382,7 +383,8 @@ export default function Project() {
           />
           {areas.map((a) => {
             const nested = aisleRows.filter((r) => r.area_id === a.id).length;
-            const rackCount = racks.filter((r) => r.area_id === a.id).length;
+            const rackCount = racks.filter((r) => r.area_id === a.id || aisleRows.find((row) => row.id === r.row_id)?.area_id === a.id).length;
+            const power = sumPowerWatts(devices, rackIdsForArea(a.id, racks, aisleRows));
             return (
               <div key={a.id}>
                 <div className="list-item">
@@ -397,7 +399,7 @@ export default function Project() {
                         <strong>{a.name}</strong>
                         <div className="muted">
                           {nested} row{nested === 1 ? "" : "s"} · {rackCount} rack{rackCount === 1 ? "" : "s"} ·{" "}
-                          {a.restricted ? a.restriction_type || "restricted" : "in scope"} · photos{" "}
+                          {formatPowerWatts(power)} · {a.restricted ? a.restriction_type || "restricted" : "in scope"} · photos{" "}
                           {a.photography_allowed ? "allowed" : "forbidden"}
                         </div>
                       </span>
@@ -508,7 +510,10 @@ export default function Project() {
               });
             }}
           />
-          {rowsForArea.map((r) => (
+          {rowsForArea.map((r) => {
+            const rackCount = racks.filter((rack) => rack.row_id === r.id).length;
+            const power = sumPowerWatts(devices, rackIdsForRow(r.id, racks));
+            return (
             <div className="list-item" key={r.id}>
               <div className="list-main">
                 <ItemSelect mode={selectMode} group="row-pick" id={r.id} selected={selected} onChange={setSelected} />
@@ -520,14 +525,15 @@ export default function Project() {
                   <span>
                     <strong>{r.name}</strong>
                     <div className="muted">
-                      {areas.find((a) => a.id === r.area_id)?.name || "no area"} ·{" "}
-                      {racks.filter((rack) => rack.row_id === r.id).length} racks
+                      {areas.find((a) => a.id === r.area_id)?.name || "no area"} · {rackCount} rack
+                      {rackCount === 1 ? "" : "s"} · {formatPowerWatts(power)}
                     </div>
                   </span>
                 </button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -634,7 +640,7 @@ export default function Project() {
                   <span>
                     <strong>{r.name}</strong>
                     <div className="muted">
-                      {layoutPath(r, aisleRows, areas)} · {r.ru_height}U
+                      {layoutPath(r, aisleRows, areas)} · {r.ru_height}U · {formatPowerWatts(sumPowerWatts(devices, [r.id]))}
                     </div>
                   </span>
                 </Link>
@@ -749,6 +755,7 @@ export default function Project() {
                   <th>Vendor / model</th>
                   <th>Serial</th>
                   <th>RU</th>
+                  <th>Power</th>
                   <th>Fan</th>
                   <th>LED / screen</th>
                   <th>EOL</th>
@@ -779,6 +786,7 @@ export default function Project() {
                       <td>
                         {d.ru_start || "—"}–{d.ru_end || "—"}
                       </td>
+                      <td>{formatPowerWatts(d.power_draw_watts)}</td>
                       <td>{d.fan_orientation}</td>
                       <td>{indicatorLabel(d.indicator_type, d.indicator_color)}</td>
                       <td>
@@ -973,6 +981,9 @@ export default function Project() {
           projectId={pid}
           device={editing}
           racks={racks}
+          areas={areas}
+          rows={aisleRows}
+          devices={devices}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);

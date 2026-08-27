@@ -143,6 +143,7 @@ class Device(Base):
     indicator_type: Mapped[str] = mapped_column(String(32), default="unknown")  # none | led | screen | both | unknown
     indicator_color: Mapped[str] = mapped_column(String(32), default="unknown")
     power_draw_watts: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    power_draw_unit: Mapped[str] = mapped_column(String(8), default="W")  # W | kW (display preference)
     management_ip: Mapped[str] = mapped_column(String(64), default="")
     discovered_via: Mapped[str] = mapped_column(String(64), default="physical")
     undocumented: Mapped[bool] = mapped_column(Boolean, default=False)

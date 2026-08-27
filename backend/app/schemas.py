@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ORMModel(BaseModel):
@@ -169,6 +169,7 @@ class DeviceIn(BaseModel):
     indicator_type: str = "unknown"
     indicator_color: str = "unknown"
     power_draw_watts: Optional[int] = None
+    power_draw_unit: Literal["W", "kW"] = "W"
     management_ip: str = ""
     discovered_via: str = "physical"
     undocumented: bool = False
@@ -176,6 +177,13 @@ class DeviceIn(BaseModel):
     eos_date: Optional[str] = None
     eol_notes: str = ""
     notes: str = ""
+
+    @field_validator("power_draw_unit", mode="before")
+    @classmethod
+    def _power_unit(cls, value: object) -> str:
+        if isinstance(value, str) and value.strip().lower() == "kw":
+            return "kW"
+        return "W"
 
 
 class DevicePatch(BaseModel):
@@ -196,6 +204,7 @@ class DevicePatch(BaseModel):
     indicator_type: Optional[str] = None
     indicator_color: Optional[str] = None
     power_draw_watts: Optional[int] = None
+    power_draw_unit: Optional[Literal["W", "kW"]] = None
     management_ip: Optional[str] = None
     discovered_via: Optional[str] = None
     undocumented: Optional[bool] = None
@@ -203,6 +212,15 @@ class DevicePatch(BaseModel):
     eos_date: Optional[str] = None
     eol_notes: Optional[str] = None
     notes: Optional[str] = None
+
+    @field_validator("power_draw_unit", mode="before")
+    @classmethod
+    def _patch_power_unit(cls, value: object) -> object:
+        if value is None or value == "":
+            return None
+        if isinstance(value, str) and value.strip().lower() == "kw":
+            return "kW"
+        return "W"
 
 
 class DeviceOut(DeviceIn, ORMModel):
