@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Catalog, OTHER, learnCatalog, loadCatalog } from "../catalog";
-import { Device, Rack, projects, uploadPhotos } from "../api";
+import { AisleRow, Area, Device, Rack, projects, uploadPhotos } from "../api";
+import { displayFromWatts, formatPowerWatts, rackIdsForArea, rackIdsForRow, sumPowerWatts, wattsFromDisplay, type PowerUnit } from "../power";
 import CameraModal from "./CameraModal";
 import PhotoGallery from "./PhotoGallery";
 
@@ -28,6 +29,7 @@ export type DeviceDraft = {
   eol_notes: string;
   undocumented: boolean;
   power_draw_watts: number | "";
+  power_draw_unit: PowerUnit;
   discovered_via: string;
 };
 
@@ -56,6 +58,7 @@ export function emptyDraft(rackId?: number | ""): DeviceDraft {
     eol_notes: "",
     undocumented: false,
     power_draw_watts: "",
+    power_draw_unit: "W",
     discovered_via: "physical",
   };
 }
@@ -87,6 +90,7 @@ export function draftFromDevice(d: Device): DeviceDraft {
     eol_notes: d.eol_notes || "",
     undocumented: d.undocumented,
     power_draw_watts: d.power_draw_watts ?? "",
+    power_draw_unit: d.power_draw_unit === "kW" ? "kW" : "W",
     discovered_via: d.discovered_via || "physical",
   };
 }
@@ -117,6 +121,7 @@ export function payloadFromDraft(draft: DeviceDraft) {
     eol_notes: draft.eol_notes,
     undocumented: draft.undocumented,
     power_draw_watts: draft.power_draw_watts === "" ? null : Number(draft.power_draw_watts),
+    power_draw_unit: draft.power_draw_unit === "kW" ? "kW" : "W",
     discovered_via: draft.discovered_via || "physical",
   };
 }
@@ -248,7 +253,11 @@ type Props = {
   value: DeviceDraft;
   onChange: (next: DeviceDraft) => void;
   racks?: Rack[];
+  areas?: Area[];
+  rows?: AisleRow[];
+  devices?: Device[];
   showLocation?: boolean;
+  showKnownLocation?: boolean;
   pendingPhotos?: File[];
   onPendingPhotos?: (files: File[]) => void;
   savedDeviceId?: number;
@@ -260,7 +269,11 @@ export function DeviceFields({
   value,
   onChange,
   racks = [],
+  areas = [],
+  rows = [],
+  devices = [],
   showLocation = true,
+  showKnownLocation,
   pendingPhotos,
   onPendingPhotos,
   savedDeviceId,
@@ -279,6 +292,67 @@ export function DeviceFields({
     return entry?.models ?? [OTHER];
   }, [catalog, value.vendor]);
   const set = (patch: Partial<DeviceDraft>) => onChange({ ...value, ...patch });
+  const knownLocation = showKnownLocation ?? !showLocation;
+
+  const selectedRack = racks.find((r) => r.id === value.rack_id);
+  const selectedRow = rows.find((r) => r.id === selectedRack?.row_id);
+  const selectedArea = areas.find((a) => a.id === (selectedRack?.area_id || selectedRow?.area_id));
+  const [areaId, setAreaId] = useState<number | "">(selectedArea?.id ?? "");
+  const [rowId, setRowId] = useState<number | "">(selectedRow?.id ?? "");
+
+  useEffect(() => {
+    setAreaId(selectedArea?.id ?? "");
+    setRowId(selectedRow?.id ?? "");
+  }, [selectedArea?.id, selectedRow?.id]);
+
+  const rowsForArea = areaId ? rows.filter((r) => r.area_id === areaId) : rows;
+  const racksForRow = racks.filter((r) => {
+    if (rowId && r.row_id !== rowId) return false;
+    if (areaId && r.area_id !== areaId && rows.find((row) => row.id === r.row_id)?.area_id !== areaId) return false;
+    return true;
+  });
+
+  const liveDevices = useMemo(() => {
+    const watts = value.power_draw_watts === "" ? 0 : Number(value.power_draw_watts) || 0;
+    const rackId = value.rack_id === "" ? null : Number(value.rack_id);
+    if (!savedDeviceId) {
+      return [
+        ...devices,
+        {
+          id: -1,
+          project_id: projectId || 0,
+          rack_id: rackId,
+          name: value.name,
+          hostname: "",
+          vendor: "",
+          model: "",
+          serial: "",
+          asset_tag: "",
+          device_type: value.device_type,
+          function: "",
+          restricted: false,
+          restricted_reason: "",
+          fan_orientation: "",
+          power_draw_watts: watts,
+          management_ip: "",
+          discovered_via: "",
+          undocumented: false,
+          eol_notes: "",
+          notes: "",
+        } as Device,
+      ];
+    }
+    return devices.map((d) =>
+      d.id === savedDeviceId ? { ...d, rack_id: rackId, power_draw_watts: watts } : d,
+    );
+  }, [devices, projectId, savedDeviceId, value.device_type, value.name, value.power_draw_watts, value.rack_id]);
+
+  const knownRowId = rowId || selectedRow?.id || "";
+  const knownAreaId = areaId || selectedArea?.id || "";
+  const rackTotal = value.rack_id === "" ? 0 : sumPowerWatts(liveDevices, [Number(value.rack_id)]);
+  const rowTotal = knownRowId === "" ? 0 : sumPowerWatts(liveDevices, rackIdsForRow(Number(knownRowId), racks));
+  const areaTotal = knownAreaId === "" ? 0 : sumPowerWatts(liveDevices, rackIdsForArea(Number(knownAreaId), racks, rows));
+  const powerDisplay = value.power_draw_watts === "" ? "" : displayFromWatts(Number(value.power_draw_watts), value.power_draw_unit);
 
   async function persist(body: { vendor?: string; model?: string; device_type?: string; function?: string }) {
     const next = await learnCatalog(body);
@@ -360,21 +434,81 @@ export function DeviceFields({
           />
         </label>
       </div>
-      {showLocation && (
-        <label className="field">
-          <span>Physical rack</span>
-          <select
-            value={value.rack_id}
-            onChange={(e) => set({ rack_id: e.target.value ? Number(e.target.value) : "" })}
-          >
-            <option value="">Unlocated — assign later</option>
-            {racks.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name} ({r.ru_height}U)
-              </option>
-            ))}
-          </select>
-        </label>
+      {showLocation ? (
+        <div className="row three">
+          <label className="field">
+            <span>Area</span>
+            <select
+              value={areaId}
+              onChange={(e) => {
+                const next = e.target.value ? Number(e.target.value) : "";
+                setAreaId(next);
+                setRowId("");
+                set({ rack_id: "" });
+              }}
+            >
+              <option value="">Unassigned</option>
+              {areas.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Row</span>
+            <select
+              value={rowId}
+              onChange={(e) => {
+                const next = e.target.value ? Number(e.target.value) : "";
+                setRowId(next);
+                const row = rows.find((r) => r.id === next);
+                if (row?.area_id) setAreaId(row.area_id);
+                const rack = racks.find((r) => r.id === value.rack_id);
+                if (!next || rack?.row_id !== next) set({ rack_id: "" });
+              }}
+            >
+              <option value="">Unassigned</option>
+              {rowsForArea.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Physical rack</span>
+            <select
+              value={value.rack_id}
+              onChange={(e) => set({ rack_id: e.target.value ? Number(e.target.value) : "" })}
+            >
+              <option value="">Unlocated — assign later</option>
+              {(rowId || areaId ? racksForRow : racks).map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name} ({r.ru_height}U)
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      ) : (
+        knownLocation &&
+        (areas.length > 0 || rows.length > 0) && (
+          <div className="row three">
+            <label className="field">
+              <span>Area</span>
+              <div className="viewfield">{selectedArea?.name || "—"}</div>
+            </label>
+            <label className="field">
+              <span>Row</span>
+              <div className="viewfield">{selectedRow?.name || selectedRack?.row_label || "—"}</div>
+            </label>
+            <label className="field">
+              <span>Physical rack</span>
+              <div className="viewfield">{selectedRack?.name || "—"}</div>
+            </label>
+          </div>
+        )
       )}
       <label className="field">
         <span>Function / logical role</span>
@@ -401,15 +535,53 @@ export function DeviceFields({
           <input value={value.management_ip} onChange={(e) => set({ management_ip: e.target.value })} />
         </label>
         <label className="field">
-          <span>Power draw (W)</span>
-          <input
-            type="number"
-            min={0}
-            value={value.power_draw_watts}
-            onChange={(e) => set({ power_draw_watts: e.target.value === "" ? "" : Number(e.target.value) })}
-          />
+          <span>Power draw</span>
+          <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+            <input
+              type="number"
+              min={0}
+              step={value.power_draw_unit === "kW" ? 0.001 : 1}
+              value={powerDisplay}
+              onChange={(e) => {
+                if (e.target.value === "") {
+                  set({ power_draw_watts: "" });
+                  return;
+                }
+                set({ power_draw_watts: wattsFromDisplay(Number(e.target.value), value.power_draw_unit) });
+              }}
+              style={{ flex: 1 }}
+            />
+            <div className="unit-toggle">
+              {(["W", "kW"] as PowerUnit[]).map((unit) => (
+                <button
+                  type="button"
+                  key={unit}
+                  className={`btn ${value.power_draw_unit === unit ? "on" : ""}`}
+                  onClick={() => set({ power_draw_unit: unit })}
+                >
+                  {unit}
+                </button>
+              ))}
+            </div>
+          </div>
         </label>
       </div>
+      {(value.rack_id !== "" || knownRowId !== "" || knownAreaId !== "") && (
+        <div className="row three">
+          <label className="field">
+            <span>Rack total</span>
+            <div className="viewfield">{value.rack_id === "" ? "—" : formatPowerWatts(rackTotal)}</div>
+          </label>
+          <label className="field">
+            <span>Row total</span>
+            <div className="viewfield">{knownRowId === "" ? "—" : formatPowerWatts(rowTotal)}</div>
+          </label>
+          <label className="field">
+            <span>Area total</span>
+            <div className="viewfield">{knownAreaId === "" ? "—" : formatPowerWatts(areaTotal)}</div>
+          </label>
+        </div>
+      )}
       <span className="muted">Fan orientation</span>
       <div className="choice">
         {(catalog?.fan_orientations ?? []).map((f) => (
@@ -539,6 +711,9 @@ export function DeviceEditorModal({
   projectId,
   device,
   racks,
+  areas = [],
+  rows = [],
+  devices = [],
   initialDraft,
   showLocation = true,
   onClose,
@@ -549,6 +724,9 @@ export function DeviceEditorModal({
   projectId: number;
   device?: Device | null;
   racks: Rack[];
+  areas?: Area[];
+  rows?: AisleRow[];
+  devices?: Device[];
   initialDraft?: DeviceDraft;
   showLocation?: boolean;
   onClose: () => void;
@@ -625,6 +803,9 @@ export function DeviceEditorModal({
           value={draft}
           onChange={setDraft}
           racks={racks}
+          areas={areas}
+          rows={rows}
+          devices={devices}
           showLocation={showLocation}
           savedDeviceId={device?.id}
           projectId={projectId}

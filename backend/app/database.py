@@ -73,3 +73,5 @@ def _ensure_columns() -> None:
                 conn.execute(text("ALTER TABLE devices ADD COLUMN indicator_type VARCHAR(32) DEFAULT 'unknown'"))
             if "indicator_color" not in dcols:
                 conn.execute(text("ALTER TABLE devices ADD COLUMN indicator_color VARCHAR(32) DEFAULT 'unknown'"))
+            if "power_draw_unit" not in dcols:
+                conn.execute(text("ALTER TABLE devices ADD COLUMN power_draw_unit VARCHAR(8) DEFAULT 'W'"))

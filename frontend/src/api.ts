@@ -487,6 +487,7 @@ export type Device = {
   indicator_type?: string;
   indicator_color?: string;
   power_draw_watts?: number | null;
+  power_draw_unit?: "W" | "kW" | null;
   management_ip: string;
   discovered_via: string;
   undocumented: boolean;

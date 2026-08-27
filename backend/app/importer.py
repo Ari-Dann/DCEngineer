@@ -14,7 +14,7 @@ from xml.etree import ElementTree as ET
 from openpyxl import load_workbook
 from sqlalchemy.orm import Session
 
-from app.catalog import DEVICE_TYPES, IMPORT_FIELDS, learn_values
+from app.catalog import DEVICE_TYPES, IMPORT_FIELDS, identity_index, infer_identity, learn_values, remember_identity
 from app.layout import apply_row_to_rack
 from app.models import AisleRow, Area, Device, Rack
 
@@ -614,6 +614,16 @@ def _device_payload(row: dict[str, str], name: str, rack: Rack | None) -> dict[s
     return payload
 
 
+def _merge_inferred_identity(payload: dict[str, Any], name: str, index: dict, existing: Device | None) -> None:
+    inferred = infer_identity(name, index=index)
+    for key in ("vendor", "model", "device_type"):
+        if key in payload or not inferred.get(key):
+            continue
+        if existing is not None and _has_value(getattr(existing, key, "")):
+            continue
+        payload[key] = inferred[key]
+
+
 def _apply_payload(device: Device, payload: dict[str, Any], *, allow_rack: bool) -> None:
     for key, value in payload.items():
         if key == "discovered_via":
@@ -660,6 +670,7 @@ def import_devices(
 
     used_mapping = _parse_mapping(mapping)
     index = _HierarchyIndex(db, project_id, default_area)
+    catalog_index = identity_index(db)
     created = 0
     updated = 0
     preserved = 0
@@ -712,6 +723,7 @@ def import_devices(
 
             payload = _device_payload(row, name, rack)
             existing = index.device(serial=payload.get("serial") or "", name=name, rack=rack)
+            _merge_inferred_identity(payload, name, catalog_index, existing)
             try:
                 if existing:
                     located_elsewhere = bool(rack and existing.rack_id and existing.rack_id != rack.id)
@@ -762,6 +774,12 @@ def import_devices(
                     model=payload.get("model") or "",
                     device_type=payload.get("device_type") or "",
                     function=payload.get("function") or "",
+                )
+                remember_identity(
+                    catalog_index,
+                    vendor=payload.get("vendor") or "",
+                    model=payload.get("model") or "",
+                    device_type=payload.get("device_type") or "",
                 )
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{sheet_name} row {offset}: {exc}")

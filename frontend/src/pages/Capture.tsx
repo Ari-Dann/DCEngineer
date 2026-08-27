@@ -62,12 +62,13 @@ export default function Capture() {
 
   async function loadDevices() {
     if (!pid) return;
-    const extra = rid ? `?rack_id=${rid}` : "";
-    setDevices(await projects.devices(Number(pid), extra));
+    setDevices(await projects.devices(Number(pid)));
   }
   useEffect(() => {
     loadDevices().catch(() => undefined);
-  }, [pid, rid]);
+  }, [pid]);
+
+  const rackDevices = rid ? devices.filter((d) => d.rack_id === rid) : devices;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -192,7 +193,11 @@ export default function Capture() {
           value={draft}
           onChange={setDraft}
           racks={racks}
+          areas={areas}
+          rows={aisleRows}
+          devices={devices}
           showLocation={false}
+          showKnownLocation={false}
           pendingPhotos={photos}
           onPendingPhotos={setPhotos}
           catalogNonce={catalogNonce}
@@ -217,8 +222,8 @@ export default function Capture() {
 
       <div className="card" style={{ marginTop: 16 }}>
         <h3>Devices in this rack</h3>
-        {devices.length === 0 && <p className="muted">None captured here yet.</p>}
-        {devices.map((d) => (
+        {rackDevices.length === 0 && <p className="muted">None captured here yet.</p>}
+        {rackDevices.map((d) => (
           <button type="button" className="list-item clickable" key={d.id} onClick={() => setEditing(d)}>
             <div style={{ textAlign: "left" }}>
               <strong>
@@ -239,6 +244,9 @@ export default function Capture() {
           projectId={Number(pid)}
           device={editing}
           racks={racks}
+          areas={areas}
+          rows={aisleRows}
+          devices={devices}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
