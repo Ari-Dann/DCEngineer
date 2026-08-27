@@ -1,7 +1,16 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Catalog, OTHER, learnCatalog, loadCatalog } from "../catalog";
-import { AisleRow, Area, Device, Rack, projects, uploadPhotos } from "../api";
-import { displayFromWatts, formatPowerWatts, rackIdsForArea, rackIdsForRow, sumPowerWatts, wattsFromDisplay, type PowerUnit } from "../power";
+import { AisleRow, Area, Device, PDU, Rack, pduLabel, projects, uploadPhotos } from "../api";
+import {
+  displayFromWatts,
+  formatHierarchyPower,
+  rackIdsForArea,
+  rackIdsForRow,
+  sumDcAmps,
+  sumPowerWatts,
+  wattsFromDisplay,
+  type PowerUnit,
+} from "../power";
 import CameraModal from "./CameraModal";
 import PhotoGallery from "./PhotoGallery";
 
@@ -30,6 +39,9 @@ export type DeviceDraft = {
   undocumented: boolean;
   power_draw_watts: number | "";
   power_draw_unit: PowerUnit;
+  dc_power_draw_amps: number | "";
+  pdu_a_id: number | "";
+  pdu_b_id: number | "";
   discovered_via: string;
 };
 
@@ -59,6 +71,9 @@ export function emptyDraft(rackId?: number | ""): DeviceDraft {
     undocumented: false,
     power_draw_watts: "",
     power_draw_unit: "W",
+    dc_power_draw_amps: "",
+    pdu_a_id: "",
+    pdu_b_id: "",
     discovered_via: "physical",
   };
 }
@@ -91,6 +106,9 @@ export function draftFromDevice(d: Device): DeviceDraft {
     undocumented: d.undocumented,
     power_draw_watts: d.power_draw_watts ?? "",
     power_draw_unit: d.power_draw_unit === "kW" ? "kW" : "W",
+    dc_power_draw_amps: d.dc_power_draw_amps ?? "",
+    pdu_a_id: d.pdu_a_id || "",
+    pdu_b_id: d.pdu_b_id || "",
     discovered_via: d.discovered_via || "physical",
   };
 }
@@ -122,6 +140,9 @@ export function payloadFromDraft(draft: DeviceDraft) {
     undocumented: draft.undocumented,
     power_draw_watts: draft.power_draw_watts === "" ? null : Number(draft.power_draw_watts),
     power_draw_unit: draft.power_draw_unit === "kW" ? "kW" : "W",
+    dc_power_draw_amps: draft.dc_power_draw_amps === "" ? null : Number(draft.dc_power_draw_amps),
+    pdu_a_id: draft.pdu_a_id === "" ? null : Number(draft.pdu_a_id),
+    pdu_b_id: draft.pdu_b_id === "" ? null : Number(draft.pdu_b_id),
     discovered_via: draft.discovered_via || "physical",
   };
 }
@@ -256,6 +277,7 @@ type Props = {
   areas?: Area[];
   rows?: AisleRow[];
   devices?: Device[];
+  pdus?: PDU[];
   showLocation?: boolean;
   showKnownLocation?: boolean;
   pendingPhotos?: File[];
@@ -272,6 +294,7 @@ export function DeviceFields({
   areas = [],
   rows = [],
   devices = [],
+  pdus = [],
   showLocation = true,
   showKnownLocation,
   pendingPhotos,
@@ -314,6 +337,7 @@ export function DeviceFields({
 
   const liveDevices = useMemo(() => {
     const watts = value.power_draw_watts === "" ? 0 : Number(value.power_draw_watts) || 0;
+    const amps = value.dc_power_draw_amps === "" ? 0 : Number(value.dc_power_draw_amps) || 0;
     const rackId = value.rack_id === "" ? null : Number(value.rack_id);
     if (!savedDeviceId) {
       return [
@@ -334,6 +358,7 @@ export function DeviceFields({
           restricted_reason: "",
           fan_orientation: "",
           power_draw_watts: watts,
+          dc_power_draw_amps: amps,
           management_ip: "",
           discovered_via: "",
           undocumented: false,
@@ -343,16 +368,54 @@ export function DeviceFields({
       ];
     }
     return devices.map((d) =>
-      d.id === savedDeviceId ? { ...d, rack_id: rackId, power_draw_watts: watts } : d,
+      d.id === savedDeviceId ? { ...d, rack_id: rackId, power_draw_watts: watts, dc_power_draw_amps: amps } : d,
     );
-  }, [devices, projectId, savedDeviceId, value.device_type, value.name, value.power_draw_watts, value.rack_id]);
+  }, [
+    devices,
+    projectId,
+    savedDeviceId,
+    value.dc_power_draw_amps,
+    value.device_type,
+    value.name,
+    value.power_draw_watts,
+    value.rack_id,
+  ]);
 
   const knownRowId = rowId || selectedRow?.id || "";
   const knownAreaId = areaId || selectedArea?.id || "";
-  const rackTotal = value.rack_id === "" ? 0 : sumPowerWatts(liveDevices, [Number(value.rack_id)]);
-  const rowTotal = knownRowId === "" ? 0 : sumPowerWatts(liveDevices, rackIdsForRow(Number(knownRowId), racks));
-  const areaTotal = knownAreaId === "" ? 0 : sumPowerWatts(liveDevices, rackIdsForArea(Number(knownAreaId), racks, rows));
+  const rackIds = value.rack_id === "" ? undefined : [Number(value.rack_id)];
+  const rowRackIds = knownRowId === "" ? undefined : rackIdsForRow(Number(knownRowId), racks);
+  const areaRackIds = knownAreaId === "" ? undefined : rackIdsForArea(Number(knownAreaId), racks, rows);
+  const rackTotal = formatHierarchyPower(
+    value.rack_id === "" ? null : sumPowerWatts(liveDevices, rackIds),
+    value.rack_id === "" ? null : sumDcAmps(liveDevices, rackIds),
+  );
+  const rowTotal = formatHierarchyPower(
+    knownRowId === "" ? null : sumPowerWatts(liveDevices, rowRackIds),
+    knownRowId === "" ? null : sumDcAmps(liveDevices, rowRackIds),
+  );
+  const areaTotal = formatHierarchyPower(
+    knownAreaId === "" ? null : sumPowerWatts(liveDevices, areaRackIds),
+    knownAreaId === "" ? null : sumDcAmps(liveDevices, areaRackIds),
+  );
   const powerDisplay = value.power_draw_watts === "" ? "" : displayFromWatts(Number(value.power_draw_watts), value.power_draw_unit);
+
+  const pdusForRack = useMemo(() => {
+    const rackId = value.rack_id === "" ? null : Number(value.rack_id);
+    const onRack = rackId ? pdus.filter((p) => p.rack_id === rackId) : pdus;
+    const extra = pdus.filter((p) => p.id === value.pdu_a_id || p.id === value.pdu_b_id);
+    const seen = new Set(onRack.map((p) => p.id));
+    return [...onRack, ...extra.filter((p) => !seen.has(p.id))];
+  }, [pdus, value.pdu_a_id, value.pdu_b_id, value.rack_id]);
+
+  function assignRack(next: number | "") {
+    const keep = (id: number | "") => {
+      if (id === "" || next === "") return id;
+      const pdu = pdus.find((p) => p.id === id);
+      return pdu && pdu.rack_id === next ? id : "";
+    };
+    set({ rack_id: next, pdu_a_id: keep(value.pdu_a_id), pdu_b_id: keep(value.pdu_b_id) });
+  }
 
   async function persist(body: { vendor?: string; model?: string; device_type?: string; function?: string }) {
     const next = await learnCatalog(body);
@@ -444,7 +507,7 @@ export function DeviceFields({
                 const next = e.target.value ? Number(e.target.value) : "";
                 setAreaId(next);
                 setRowId("");
-                set({ rack_id: "" });
+                assignRack("");
               }}
             >
               <option value="">Unassigned</option>
@@ -465,7 +528,7 @@ export function DeviceFields({
                 const row = rows.find((r) => r.id === next);
                 if (row?.area_id) setAreaId(row.area_id);
                 const rack = racks.find((r) => r.id === value.rack_id);
-                if (!next || rack?.row_id !== next) set({ rack_id: "" });
+                if (!next || rack?.row_id !== next) assignRack("");
               }}
             >
               <option value="">Unassigned</option>
@@ -480,7 +543,7 @@ export function DeviceFields({
             <span>Physical rack</span>
             <select
               value={value.rack_id}
-              onChange={(e) => set({ rack_id: e.target.value ? Number(e.target.value) : "" })}
+              onChange={(e) => assignRack(e.target.value ? Number(e.target.value) : "")}
             >
               <option value="">Unlocated — assign later</option>
               {(rowId || areaId ? racksForRow : racks).map((r) => (
@@ -529,13 +592,13 @@ export function DeviceFields({
           ))}
         </datalist>
       </label>
+      <label className="field">
+        <span>Management IP</span>
+        <input value={value.management_ip} onChange={(e) => set({ management_ip: e.target.value })} />
+      </label>
       <div className="row">
         <label className="field">
-          <span>Management IP</span>
-          <input value={value.management_ip} onChange={(e) => set({ management_ip: e.target.value })} />
-        </label>
-        <label className="field">
-          <span>Power draw</span>
+          <span>AC power draw</span>
           <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
             <input
               type="number"
@@ -565,20 +628,71 @@ export function DeviceFields({
             </div>
           </div>
         </label>
+        <label className="field">
+          <span>DC power draw</span>
+          <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+            <input
+              type="number"
+              min={0}
+              step={0.1}
+              value={value.dc_power_draw_amps}
+              onChange={(e) =>
+                set({ dc_power_draw_amps: e.target.value === "" ? "" : Number(e.target.value) })
+              }
+              style={{ flex: 1 }}
+            />
+            <div className="viewfield" style={{ minWidth: 52, justifyContent: "center" }}>
+              A
+            </div>
+          </div>
+        </label>
+      </div>
+      <div className="row">
+        <label className="field">
+          <span>PDU A</span>
+          <select
+            value={value.pdu_a_id}
+            onChange={(e) => set({ pdu_a_id: e.target.value ? Number(e.target.value) : "" })}
+          >
+            <option value="">Not connected</option>
+            {pdusForRack.map((p) => (
+              <option key={p.id} value={p.id}>
+                {pduLabel(p, racks)}
+              </option>
+            ))}
+          </select>
+          {value.rack_id !== "" && pdusForRack.length === 0 && (
+            <span className="muted">Add PDUs on this rack to assign feeds.</span>
+          )}
+        </label>
+        <label className="field">
+          <span>PDU B</span>
+          <select
+            value={value.pdu_b_id}
+            onChange={(e) => set({ pdu_b_id: e.target.value ? Number(e.target.value) : "" })}
+          >
+            <option value="">Not connected</option>
+            {pdusForRack.map((p) => (
+              <option key={p.id} value={p.id}>
+                {pduLabel(p, racks)}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
       {(value.rack_id !== "" || knownRowId !== "" || knownAreaId !== "") && (
         <div className="row three">
           <label className="field">
             <span>Rack total</span>
-            <div className="viewfield">{value.rack_id === "" ? "—" : formatPowerWatts(rackTotal)}</div>
+            <div className="viewfield">{value.rack_id === "" ? "—" : rackTotal}</div>
           </label>
           <label className="field">
             <span>Row total</span>
-            <div className="viewfield">{knownRowId === "" ? "—" : formatPowerWatts(rowTotal)}</div>
+            <div className="viewfield">{knownRowId === "" ? "—" : rowTotal}</div>
           </label>
           <label className="field">
             <span>Area total</span>
-            <div className="viewfield">{knownAreaId === "" ? "—" : formatPowerWatts(areaTotal)}</div>
+            <div className="viewfield">{knownAreaId === "" ? "—" : areaTotal}</div>
           </label>
         </div>
       )}
@@ -714,6 +828,7 @@ export function DeviceEditorModal({
   areas = [],
   rows = [],
   devices = [],
+  pdus = [],
   initialDraft,
   showLocation = true,
   onClose,
@@ -727,6 +842,7 @@ export function DeviceEditorModal({
   areas?: Area[];
   rows?: AisleRow[];
   devices?: Device[];
+  pdus?: PDU[];
   initialDraft?: DeviceDraft;
   showLocation?: boolean;
   onClose: () => void;
@@ -806,6 +922,7 @@ export function DeviceEditorModal({
           areas={areas}
           rows={rows}
           devices={devices}
+          pdus={pdus}
           showLocation={showLocation}
           savedDeviceId={device?.id}
           projectId={projectId}

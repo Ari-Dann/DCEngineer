@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { AisleRow, Area, Device, Project, Rack, enqueue, layoutPath, projects, uploadPhotos } from "../api";
+import { AisleRow, Area, Device, PDU, Project, Rack, enqueue, layoutPath, projects, uploadPhotos } from "../api";
 import { DeviceEditorModal, DeviceFields, emptyDraft, payloadFromDraft } from "../components/DeviceEditor";
 import LocatePanel from "../components/LocatePanel";
 import type { DeviceDraft } from "../components/DeviceEditor";
@@ -12,6 +12,7 @@ export default function Capture() {
   const [aisleRows, setAisleRows] = useState<AisleRow[]>([]);
   const [racks, setRacks] = useState<Rack[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
+  const [pdus, setPdus] = useState<PDU[]>([]);
   const [pid, setPid] = useState<number | "">("");
   const [areaId, setAreaId] = useState<number | "">("");
   const [rowId, setRowId] = useState<number | "">("");
@@ -34,11 +35,16 @@ export default function Capture() {
 
   useEffect(() => {
     if (!pid) return;
-    Promise.all([projects.areas(Number(pid)), projects.rows(Number(pid)), projects.racks(Number(pid))]).then(
-      ([nextAreas, nextRows, nextRacks]) => {
+    Promise.all([
+      projects.areas(Number(pid)),
+      projects.rows(Number(pid)),
+      projects.racks(Number(pid)),
+      projects.projectPdus(Number(pid)),
+    ]).then(([nextAreas, nextRows, nextRacks, nextPdus]) => {
         setAreas(nextAreas);
         setAisleRows(nextRows);
         setRacks(nextRacks);
+        setPdus(nextPdus);
         setAreaId((current) => (current && nextAreas.some((a) => a.id === current) ? current : ""));
         setRowId((current) => (current && nextRows.some((r) => r.id === current) ? current : ""));
         setRid((current) => {
@@ -196,6 +202,7 @@ export default function Capture() {
           areas={areas}
           rows={aisleRows}
           devices={devices}
+          pdus={pdus}
           showLocation={false}
           showKnownLocation={false}
           pendingPhotos={photos}
@@ -247,6 +254,7 @@ export default function Capture() {
           areas={areas}
           rows={aisleRows}
           devices={devices}
+          pdus={pdus}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);

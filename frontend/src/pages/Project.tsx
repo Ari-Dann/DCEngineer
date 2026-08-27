@@ -8,6 +8,7 @@ import {
   Device,
   Handoff,
   ImportResult,
+  PDU,
   Project as ProjectT,
   Rack,
   downloadAuth,
@@ -16,7 +17,7 @@ import {
   layoutPath,
   projects,
 } from "../api";
-import { formatPowerWatts, rackIdsForArea, rackIdsForRow, sumPowerWatts } from "../power";
+import { formatAmps, formatHierarchyPower, formatPowerWatts, rackIdsForArea, rackIdsForRow, sumDcAmps, sumPowerWatts } from "../power";
 import { DeviceEditorModal, RackHeightField } from "../components/DeviceEditor";
 import ImportWizard from "../components/ImportWizard";
 import LocatePanel from "../components/LocatePanel";
@@ -47,6 +48,7 @@ export default function Project() {
   const [aisleRows, setAisleRows] = useState<AisleRow[]>([]);
   const [racks, setRacks] = useState<Rack[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
+  const [pdus, setPdus] = useState<PDU[]>([]);
   const [cables, setCables] = useState<Cable[]>([]);
   const [lists, setLists] = useState<Checklist[]>([]);
   const [hands, setHands] = useState<Handoff[]>([]);
@@ -103,6 +105,7 @@ export default function Project() {
       setAisleRows(await projects.rows(pid));
       setRacks(await projects.racks(pid));
       setDevices(await projects.devices(pid));
+      setPdus(await projects.projectPdus(pid));
       setCables(await projects.cables(pid));
       setLists(await projects.checklists(pid));
       setHands(await projects.handoffs(pid));
@@ -384,7 +387,8 @@ export default function Project() {
           {areas.map((a) => {
             const nested = aisleRows.filter((r) => r.area_id === a.id).length;
             const rackCount = racks.filter((r) => r.area_id === a.id || aisleRows.find((row) => row.id === r.row_id)?.area_id === a.id).length;
-            const power = sumPowerWatts(devices, rackIdsForArea(a.id, racks, aisleRows));
+            const watts = sumPowerWatts(devices, rackIdsForArea(a.id, racks, aisleRows));
+            const amps = sumDcAmps(devices, rackIdsForArea(a.id, racks, aisleRows));
             return (
               <div key={a.id}>
                 <div className="list-item">
@@ -399,7 +403,7 @@ export default function Project() {
                         <strong>{a.name}</strong>
                         <div className="muted">
                           {nested} row{nested === 1 ? "" : "s"} · {rackCount} rack{rackCount === 1 ? "" : "s"} ·{" "}
-                          {formatPowerWatts(power)} · {a.restricted ? a.restriction_type || "restricted" : "in scope"} · photos{" "}
+                          {formatHierarchyPower(watts, amps)} · {a.restricted ? a.restriction_type || "restricted" : "in scope"} · photos{" "}
                           {a.photography_allowed ? "allowed" : "forbidden"}
                         </div>
                       </span>
@@ -512,7 +516,8 @@ export default function Project() {
           />
           {rowsForArea.map((r) => {
             const rackCount = racks.filter((rack) => rack.row_id === r.id).length;
-            const power = sumPowerWatts(devices, rackIdsForRow(r.id, racks));
+            const watts = sumPowerWatts(devices, rackIdsForRow(r.id, racks));
+            const amps = sumDcAmps(devices, rackIdsForRow(r.id, racks));
             return (
             <div className="list-item" key={r.id}>
               <div className="list-main">
@@ -526,7 +531,7 @@ export default function Project() {
                     <strong>{r.name}</strong>
                     <div className="muted">
                       {areas.find((a) => a.id === r.area_id)?.name || "no area"} · {rackCount} rack
-                      {rackCount === 1 ? "" : "s"} · {formatPowerWatts(power)}
+                      {rackCount === 1 ? "" : "s"} · {formatHierarchyPower(watts, amps)}
                     </div>
                   </span>
                 </button>
@@ -640,7 +645,7 @@ export default function Project() {
                   <span>
                     <strong>{r.name}</strong>
                     <div className="muted">
-                      {layoutPath(r, aisleRows, areas)} · {r.ru_height}U · {formatPowerWatts(sumPowerWatts(devices, [r.id]))}
+                      {layoutPath(r, aisleRows, areas)} · {r.ru_height}U · {formatHierarchyPower(sumPowerWatts(devices, [r.id]), sumDcAmps(devices, [r.id]))}
                     </div>
                   </span>
                 </Link>
@@ -755,7 +760,10 @@ export default function Project() {
                   <th>Vendor / model</th>
                   <th>Serial</th>
                   <th>RU</th>
-                  <th>Power</th>
+                  <th>AC</th>
+                  <th>DC</th>
+                  <th>PDU A</th>
+                  <th>PDU B</th>
                   <th>Fan</th>
                   <th>LED / screen</th>
                   <th>EOL</th>
@@ -787,6 +795,9 @@ export default function Project() {
                         {d.ru_start || "—"}–{d.ru_end || "—"}
                       </td>
                       <td>{formatPowerWatts(d.power_draw_watts)}</td>
+                      <td>{formatAmps(d.dc_power_draw_amps)}</td>
+                      <td>{pdus.find((p) => p.id === d.pdu_a_id)?.name || "—"}</td>
+                      <td>{pdus.find((p) => p.id === d.pdu_b_id)?.name || "—"}</td>
                       <td>{d.fan_orientation}</td>
                       <td>{indicatorLabel(d.indicator_type, d.indicator_color)}</td>
                       <td>
@@ -984,6 +995,7 @@ export default function Project() {
           areas={areas}
           rows={aisleRows}
           devices={devices}
+          pdus={pdus}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);

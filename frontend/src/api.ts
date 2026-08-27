@@ -221,6 +221,7 @@ export const projects = {
     return api<ImportResult>(`/api/projects/${id}/import`, { method: "POST", body: fd });
   },
   pdus: (pid: number, rid: number) => api<PDU[]>(`/api/projects/${pid}/racks/${rid}/pdus`),
+  projectPdus: (pid: number) => api<PDU[]>(`/api/projects/${pid}/pdus`),
   addPdu: (pid: number, rid: number, body: Partial<PDU> & { name: string }) =>
     api<PDU>(`/api/projects/${pid}/racks/${rid}/pdus`, { method: "POST", body: JSON.stringify(body) }),
   mapPort: (pid: number, pduId: number, portId: number, body: { port_label: string; device_id: number | null; notes: string }) =>
@@ -467,6 +468,11 @@ export function layoutPath(rack: Rack, rows: AisleRow[] = [], areas: Area[] = []
   return [area?.name, row?.name || rack.row_label, rack.name].filter(Boolean).join(" / ");
 }
 
+export function pduLabel(pdu: PDU, racks: Rack[] = []) {
+  const rack = racks.find((r) => r.id === pdu.rack_id);
+  return rack ? `${pdu.name} (${rack.name})` : pdu.name;
+}
+
 export type Device = {
   id: number;
   project_id: number;
@@ -488,6 +494,9 @@ export type Device = {
   indicator_color?: string;
   power_draw_watts?: number | null;
   power_draw_unit?: "W" | "kW" | null;
+  dc_power_draw_amps?: number | null;
+  pdu_a_id?: number | null;
+  pdu_b_id?: number | null;
   management_ip: string;
   discovered_via: string;
   undocumented: boolean;
