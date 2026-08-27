@@ -781,3 +781,60 @@ def test_area_row_rack_hierarchy_copy_move_search(client, auth):
     assert auto.json()["row_id"]
     listed = client.get(f"/api/projects/{pid}/rows", headers=auth).json()
     assert any(r["name"] == "AutoRow" and r["id"] == auto.json()["row_id"] for r in listed)
+
+
+def test_hierarchy_delete_unassigns_children(client, auth):
+    project = client.post("/api/projects", headers=auth, json={"name": "Delete site"})
+    assert project.status_code == 201, project.text
+    pid = project.json()["id"]
+    area = client.post(f"/api/projects/{pid}/areas", headers=auth, json={"name": "Hall Del"}).json()
+    row = client.post(
+        f"/api/projects/{pid}/rows",
+        headers=auth,
+        json={"name": "Row Del", "area_id": area["id"]},
+    ).json()
+    rack = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "D01", "row_id": row["id"], "area_id": area["id"], "ru_height": 42},
+    ).json()
+    device = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={"name": "sw-del", "rack_id": rack["id"], "serial": "SN-DEL", "ru_start": 10, "ru_end": 10},
+    ).json()
+
+    gone_device = client.delete(f"/api/projects/{pid}/devices/{device['id']}", headers=auth)
+    assert gone_device.status_code == 200
+    assert client.get(f"/api/projects/{pid}/devices/{device['id']}", headers=auth).status_code == 404
+
+    device2 = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={"name": "sw-del-2", "rack_id": rack["id"], "serial": "SN-DEL-2", "ru_start": 11, "ru_end": 11},
+    )
+    assert device2.status_code == 201, device2.text
+    did2 = device2.json()["id"]
+    gone_rack = client.delete(f"/api/projects/{pid}/racks/{rack['id']}", headers=auth)
+    assert gone_rack.status_code == 200
+    leftover = client.get(f"/api/projects/{pid}/devices/{did2}", headers=auth)
+    assert leftover.status_code == 200
+    assert leftover.json()["rack_id"] is None
+    assert leftover.json()["serial"] == "SN-DEL-2"
+
+    rack = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "D02", "row_id": row["id"], "area_id": area["id"], "ru_height": 42},
+    ).json()
+    gone_row = client.delete(f"/api/projects/{pid}/rows/{row['id']}", headers=auth)
+    assert gone_row.status_code == 200
+    kept_rack = next(r for r in client.get(f"/api/projects/{pid}/racks", headers=auth).json() if r["id"] == rack["id"])
+    assert kept_rack["row_id"] is None
+    assert client.get(f"/api/projects/{pid}/rows", headers=auth).json() == []
+
+    gone_area = client.delete(f"/api/projects/{pid}/areas/{area['id']}", headers=auth)
+    assert gone_area.status_code == 200, gone_area.text
+    assert client.get(f"/api/projects/{pid}/areas", headers=auth).json() == []
+    kept_rack = next(r for r in client.get(f"/api/projects/{pid}/racks", headers=auth).json() if r["id"] == rack["id"])
+    assert kept_rack["area_id"] is None

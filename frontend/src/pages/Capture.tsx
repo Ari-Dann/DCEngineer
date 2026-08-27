@@ -3,6 +3,7 @@ import { AisleRow, Area, Device, Project, Rack, enqueue, layoutPath, projects, u
 import { DeviceEditorModal, DeviceFields, emptyDraft, payloadFromDraft } from "../components/DeviceEditor";
 import LocatePanel from "../components/LocatePanel";
 import type { DeviceDraft } from "../components/DeviceEditor";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { learnCatalog } from "../catalog";
 
 export default function Capture() {
@@ -20,6 +21,7 @@ export default function Capture() {
   const [photos, setPhotos] = useState<File[]>([]);
   const [draft, setDraft] = useState<DeviceDraft>(emptyDraft());
   const [editing, setEditing] = useState<Device | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Device | null>(null);
   const [busy, setBusy] = useState(false);
   const [catalogNonce, setCatalogNonce] = useState(0);
 
@@ -240,6 +242,21 @@ export default function Capture() {
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
+            loadDevices();
+          }}
+          onDelete={() => {
+            setPendingDelete(editing);
+            setEditing(null);
+          }}
+        />
+      )}
+      {pendingDelete && pid && (
+        <ConfirmDialog
+          title={`Delete device “${pendingDelete.name}”?`}
+          message="This device will be removed from the project."
+          onClose={() => setPendingDelete(null)}
+          onConfirm={async () => {
+            await projects.deleteDevice(Number(pid), pendingDelete.id);
             loadDevices();
           }}
         />

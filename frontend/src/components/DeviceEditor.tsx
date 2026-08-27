@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Catalog, OTHER, learnCatalog, loadCatalog } from "../catalog";
-import { Device, Rack, projects } from "../api";
+import { Device, Rack, projects, uploadPhotos } from "../api";
 import CameraModal from "./CameraModal";
 import PhotoGallery from "./PhotoGallery";
 
@@ -539,18 +539,26 @@ export function DeviceEditorModal({
   projectId,
   device,
   racks,
+  initialDraft,
+  showLocation = true,
   onClose,
   onSaved,
   onRelocate,
+  onDelete,
 }: {
   projectId: number;
-  device: Device;
+  device?: Device | null;
   racks: Rack[];
+  initialDraft?: DeviceDraft;
+  showLocation?: boolean;
   onClose: () => void;
   onSaved: (d: Device) => void;
   onRelocate?: (mode: "copy" | "move") => void;
+  onDelete?: () => void;
 }) {
-  const [draft, setDraft] = useState(draftFromDevice(device));
+  const creating = !device;
+  const [draft, setDraft] = useState(device ? draftFromDevice(device) : initialDraft || emptyDraft());
+  const [photos, setPhotos] = useState<File[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -559,7 +567,18 @@ export function DeviceEditorModal({
     setBusy(true);
     setError("");
     try {
-      const saved = await projects.updateDevice(projectId, device.id, payloadFromDraft(draft));
+      const body = payloadFromDraft(draft);
+      if (!body.name) {
+        setError("Device name is required.");
+        setBusy(false);
+        return;
+      }
+      const saved = device
+        ? await projects.updateDevice(projectId, device.id, body)
+        : await projects.addDevice(projectId, body);
+      if (!device && photos.length) {
+        await uploadPhotos("device", saved.id, photos, draft.restricted);
+      }
       onSaved(saved);
       onClose();
     } catch (err) {
@@ -569,13 +588,19 @@ export function DeviceEditorModal({
     }
   }
 
+  const title = device
+    ? `Edit ${device.name}`
+    : draft.ru_start
+      ? `Add device at U${draft.ru_start}`
+      : "Add device";
+
   return (
     <div className="overlay" role="dialog" aria-modal="true">
       <form className="sheet" onSubmit={onSubmit}>
         <div className="camera-head">
-          <h2>Edit {device.name}</h2>
+          <h2>{title}</h2>
           <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {onRelocate && (
+            {!creating && onRelocate && (
               <>
                 <button type="button" className="btn" onClick={() => onRelocate("copy")}>
                   Copy
@@ -585,15 +610,29 @@ export function DeviceEditorModal({
                 </button>
               </>
             )}
+            {!creating && onDelete && (
+              <button type="button" className="btn danger" onClick={onDelete}>
+                Delete
+              </button>
+            )}
             <button type="button" className="btn" onClick={onClose}>
               Close
             </button>
           </span>
         </div>
         {error && <div className="error">{error}</div>}
-        <DeviceFields value={draft} onChange={setDraft} racks={racks} savedDeviceId={device.id} projectId={projectId} />
+        <DeviceFields
+          value={draft}
+          onChange={setDraft}
+          racks={racks}
+          showLocation={showLocation}
+          savedDeviceId={device?.id}
+          projectId={projectId}
+          pendingPhotos={creating ? photos : undefined}
+          onPendingPhotos={creating ? setPhotos : undefined}
+        />
         <button className="btn primary block" disabled={busy}>
-          {busy ? "Saving…" : "Save changes"}
+          {busy ? "Saving…" : creating ? "Save device" : "Save changes"}
         </button>
       </form>
     </div>

@@ -162,6 +162,7 @@ tr:hover td { background: var(--bg-hover); }
 .ru .u { display: grid; place-items: center; color: var(--muted); font-size: 0.7rem; background: #0e141c; }
 .ru .slot { padding: 2px 8px; font-size: 0.78rem; display: flex; align-items: center; gap: 8px; border: 0; width: 100%; text-align: left; min-height: 22px; cursor: pointer; background: transparent; color: inherit; }
 .ru .slot.empty { color: #3a4a5c; }
+.ru .slot.empty:hover, .ru .slot.empty.picked { color: var(--accent); background: var(--bg-hover); }
 .dev-server { background: color-mix(in srgb, var(--accent) 35%, var(--bg-elev)); }
 .dev-switch { background: color-mix(in srgb, var(--accent-2) 35%, var(--bg-elev)); }
 .dev-router { background: color-mix(in srgb, #5ec8e8 40%, var(--bg-elev)); }

@@ -20,6 +20,7 @@ import ImportWizard from "../components/ImportWizard";
 import LocatePanel from "../components/LocatePanel";
 import PhotoGallery from "../components/PhotoGallery";
 import RelocateDialog, { RelocateKind } from "../components/RelocateDialog";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 const TABS = ["overview", "areas", "rows", "racks", "devices", "locate", "cables", "checklists", "handoffs", "lifecycle"] as const;
 type Tab = (typeof TABS)[number];
@@ -55,6 +56,12 @@ export default function Project() {
   const [openArea, setOpenArea] = useState<number | null>(null);
   const [editingArea, setEditingArea] = useState<Area | null>(null);
   const [relocate, setRelocate] = useState<{ kind: RelocateKind; id: number; mode: "copy" | "move" } | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{
+    kind: RelocateKind;
+    id: number;
+    name: string;
+    detail: string;
+  } | null>(null);
   const [hand, setHand] = useState({
     handoff_date: new Date().toISOString().slice(0, 10),
     from_name: "",
@@ -272,6 +279,20 @@ export default function Project() {
                     <button type="button" className="btn" onClick={() => setRelocate({ kind: "area", id: a.id, mode: "move" })}>
                       Move
                     </button>
+                    <button
+                      type="button"
+                      className="btn danger"
+                      onClick={() =>
+                        setPendingDelete({
+                          kind: "area",
+                          id: a.id,
+                          name: a.name,
+                          detail: `${nested} row${nested === 1 ? "" : "s"} and ${rackCount} rack${rackCount === 1 ? "" : "s"} stay in the project without this area.`,
+                        })
+                      }
+                    >
+                      Delete
+                    </button>
                   </span>
                 </div>
                 {editingArea?.id === a.id && (
@@ -377,6 +398,21 @@ export default function Project() {
                 <button type="button" className="btn" onClick={() => setRelocate({ kind: "row", id: r.id, mode: "move" })}>
                   Move
                 </button>
+                <button
+                  type="button"
+                  className="btn danger"
+                  onClick={() => {
+                    const n = racks.filter((rack) => rack.row_id === r.id).length;
+                    setPendingDelete({
+                      kind: "row",
+                      id: r.id,
+                      name: r.name,
+                      detail: `${n} rack${n === 1 ? "" : "s"} stay in the project without this row.`,
+                    });
+                  }}
+                >
+                  Delete
+                </button>
               </span>
             </div>
           ))}
@@ -455,6 +491,21 @@ export default function Project() {
                 </button>
                 <button type="button" className="btn" onClick={() => setRelocate({ kind: "rack", id: r.id, mode: "move" })}>
                   Move
+                </button>
+                <button
+                  type="button"
+                  className="btn danger"
+                  onClick={() => {
+                    const n = devices.filter((d) => d.rack_id === r.id).length;
+                    setPendingDelete({
+                      kind: "rack",
+                      id: r.id,
+                      name: r.name,
+                      detail: `${n} device${n === 1 ? "" : "s"} in this rack will become unlocated.`,
+                    });
+                  }}
+                >
+                  Delete
                 </button>
               </span>
             </div>
@@ -588,6 +639,20 @@ export default function Project() {
                             onClick={() => setRelocate({ kind: "device", id: d.id, mode: "move" })}
                           >
                             Move
+                          </button>
+                          <button
+                            type="button"
+                            className="btn danger"
+                            onClick={() =>
+                              setPendingDelete({
+                                kind: "device",
+                                id: d.id,
+                                name: d.name,
+                                detail: "This device will be removed from the project.",
+                              })
+                            }
+                          >
+                            Delete
                           </button>
                         </span>
                       </td>
@@ -788,6 +853,15 @@ export default function Project() {
             setRelocate({ kind: "device", id: editing.id, mode });
             setEditing(null);
           }}
+          onDelete={() => {
+            setPendingDelete({
+              kind: "device",
+              id: editing.id,
+              name: editing.name,
+              detail: "This device will be removed from the project.",
+            });
+            setEditing(null);
+          }}
         />
       )}
       {relocate && (
@@ -798,6 +872,20 @@ export default function Project() {
           entityId={relocate.id}
           onClose={() => setRelocate(null)}
           onDone={load}
+        />
+      )}
+      {pendingDelete && (
+        <ConfirmDialog
+          title={`Delete ${pendingDelete.kind} “${pendingDelete.name}”?`}
+          message={pendingDelete.detail}
+          onClose={() => setPendingDelete(null)}
+          onConfirm={async () => {
+            if (pendingDelete.kind === "area") await projects.deleteArea(pid, pendingDelete.id);
+            else if (pendingDelete.kind === "row") await projects.deleteRow(pid, pendingDelete.id);
+            else if (pendingDelete.kind === "rack") await projects.deleteRack(pid, pendingDelete.id);
+            else await projects.deleteDevice(pid, pendingDelete.id);
+            load();
+          }}
         />
       )}
     </div>
