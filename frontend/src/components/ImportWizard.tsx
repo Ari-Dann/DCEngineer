@@ -60,6 +60,7 @@ export default function ImportWizard({
   const [headerMap, setHeaderMap] = useState<HeaderMap>({});
   const [areas, setAreas] = useState<Area[]>([]);
   const [defaultAreaId, setDefaultAreaId] = useState<number | "">(initialAreaId || "");
+  const [allSheets, setAllSheets] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -93,6 +94,7 @@ export default function ImportWizard({
       setOrientation(chosenSheet?.orientation || "rows");
       setHeaderIndex(chosenSheet?.header_index ?? 0);
       setHeaderMap(chosenSheet ? initialHeaderMap(chosenSheet) : {});
+      if ((body.sheets || []).length <= 1) setAllSheets(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not read the file");
       setPreview(null);
@@ -145,6 +147,7 @@ export default function ImportWizard({
         header_index: headerIndex,
         mapping,
         default_area_id: defaultAreaId || undefined,
+        all_sheets: allSheets || undefined,
       });
       invalidateCatalog();
       onImported(Number(pid), result);
@@ -165,9 +168,9 @@ export default function ImportWizard({
           </button>
         </div>
         <p className="muted">
-          Choose a project, then map spreadsheet columns (or rows) onto device and layout fields. If the sheet has Area
-          and Row/Aisle columns, the import creates those records and fills the area even when some lines have no
-          device. CSV, XLSX, and ODS are supported.
+          Choose a project, then map spreadsheet columns (or rows) onto device and layout fields. Import follows Area →
+          Row → Rack → Device and will not move populated items into a different parent. Empty cells do not blank
+          fields that are already filled. CSV, XLSX, and ODS are supported.
         </p>
         {error && <div className="error">{error}</div>}
 
@@ -211,16 +214,25 @@ export default function ImportWizard({
         {preview && sheet && (
           <>
             {preview.sheets.length > 1 && (
-              <label className="field">
-                <span>Sheet</span>
-                <select value={sheetName} onChange={(e) => onSheetChange(e.target.value)}>
-                  {preview.sheets.map((s) => (
-                    <option key={s.name} value={s.name}>
-                      {s.name} ({s.record_count} records, {s.mapped_fields.length} fields guessed)
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <>
+                <label className="field">
+                  <span>{allSheets ? "Preview / mapping sheet" : "Sheet"}</span>
+                  <select value={sheetName} onChange={(e) => onSheetChange(e.target.value)}>
+                    {preview.sheets.map((s) => (
+                      <option key={s.name} value={s.name}>
+                        {s.name} ({s.record_count} records, {s.mapped_fields.length} fields guessed)
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="check-row">
+                  <input type="checkbox" checked={allSheets} onChange={(e) => setAllSheets(e.target.checked)} />
+                  <span>
+                    Import every sheet in this file. Named sheets become areas (or rows if a default area is set) unless
+                    the name is generic, such as Devices, Cover, Inventory, or Sheet1.
+                  </span>
+                </label>
+              </>
             )}
             <div className="row">
               <label className="field">

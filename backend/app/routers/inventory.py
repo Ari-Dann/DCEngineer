@@ -124,6 +124,10 @@ def _get_rack(db: Session, project_id: int, rack_id: int) -> Rack:
     return rack
 
 
+def _form_flag(value: Optional[str]) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _get_device(db: Session, project_id: int, device_id: int) -> Device:
     device = db.get(Device, device_id)
     if not device or device.project_id != project_id:
@@ -590,6 +594,7 @@ async def import_inventory(
     header_index: Optional[int] = Form(None),
     mapping: Optional[str] = Form(None),
     default_area_id: Optional[int] = Form(None),
+    all_sheets: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     user: User = Depends(ImportUser),
 ):
@@ -609,6 +614,7 @@ async def import_inventory(
             header_index=header_index,
             mapping=mapping,
             default_area_id=default_area_id,
+            all_sheets=_form_flag(all_sheets),
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
