@@ -117,7 +117,7 @@ class Rack(Base):
     project: Mapped["Project"] = relationship(back_populates="racks")
     area: Mapped[Optional["Area"]] = relationship(back_populates="racks")
     aisle_row: Mapped[Optional["AisleRow"]] = relationship(back_populates="racks")
-    devices: Mapped[list["Device"]] = relationship(back_populates="rack", cascade="all, delete-orphan")
+    devices: Mapped[list["Device"]] = relationship(back_populates="rack", passive_deletes=True)
     pdus: Mapped[list["PDU"]] = relationship(back_populates="rack", cascade="all, delete-orphan")
 
 
