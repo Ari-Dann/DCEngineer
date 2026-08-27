@@ -219,6 +219,8 @@ def delete_area(project_id: int, area_id: int, db: Session = Depends(get_db), _:
     area = db.get(Area, area_id)
     if not area or area.project_id != project_id:
         raise HTTPException(404, "Area not found")
+    db.query(AisleRow).filter(AisleRow.area_id == area_id).update({AisleRow.area_id: None}, synchronize_session=False)
+    db.query(Rack).filter(Rack.area_id == area_id).update({Rack.area_id: None}, synchronize_session=False)
     db.delete(area)
     db.commit()
     return {"ok": True}
@@ -268,6 +270,7 @@ def update_row(project_id: int, row_id: int, body: RowIn, db: Session = Depends(
 @projects_router.delete("/{project_id}/rows/{row_id}")
 def delete_row(project_id: int, row_id: int, db: Session = Depends(get_db), _: User = Depends(WriteUser)):
     row = _get_row(db, project_id, row_id)
+    db.query(Rack).filter(Rack.row_id == row_id).update({Rack.row_id: None}, synchronize_session=False)
     db.delete(row)
     db.commit()
     return {"ok": True}
