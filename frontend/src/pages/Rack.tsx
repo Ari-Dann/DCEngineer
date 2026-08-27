@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { AisleRow, Area, Device, Elevation, PDU, Rack, downloadAuth, layoutPath, projects, uploadPhotos } from "../api";
 import {
   DeviceDraft,
@@ -11,9 +11,11 @@ import {
 } from "../components/DeviceEditor";
 import PhotoGallery from "../components/PhotoGallery";
 import RelocateDialog, { RelocateKind } from "../components/RelocateDialog";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 export default function RackPage() {
   const { id, rackId } = useParams();
+  const navigate = useNavigate();
   const pid = Number(id);
   const rid = Number(rackId);
   const [elev, setElev] = useState<Elevation | null>(null);
@@ -26,7 +28,11 @@ export default function RackPage() {
   const [photos, setPhotos] = useState<File[]>([]);
   const [pduName, setPduName] = useState("PDU-A");
   const [editing, setEditing] = useState<Device | null>(null);
+  const [adding, setAdding] = useState<DeviceDraft | null>(null);
   const [relocate, setRelocate] = useState<{ kind: RelocateKind; id: number; mode: "copy" | "move" } | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ kind: "rack" | "device"; id: number; name: string; detail: string } | null>(
+    null,
+  );
   const [height, setHeight] = useState(42);
 
   async function load() {
@@ -104,13 +110,18 @@ export default function RackPage() {
                   <div className="u">{s.u}</div>
                   <button
                     type="button"
-                    className={`slot ${dev ? `dev-${dev.device_type}` : "empty"}`}
+                    className={`slot ${dev ? `dev-${dev.device_type}` : "empty"}${!dev && adding?.ru_start === s.u ? " picked" : ""}`}
                     onClick={() => {
-                      if (dev) setEditing(dev);
-                      else setDraft((d) => ({ ...d, ru_start: s.u }));
+                      if (dev) {
+                        setAdding(null);
+                        setEditing(dev);
+                      } else {
+                        setEditing(null);
+                        setAdding({ ...emptyDraft(rid), ru_start: s.u, ru_height: 1 });
+                      }
                     }}
                   >
-                    {top ? `${dev?.name} · ${dev?.vendor} ${dev?.model}` : dev ? "" : "empty"}
+                    {top ? `${dev?.name} · ${dev?.vendor} ${dev?.model}` : dev ? "" : "empty — click to add"}
                   </button>
                 </div>
               );
@@ -121,7 +132,37 @@ export default function RackPage() {
           <form className="card" onSubmit={saveRack}>
             <h3>Edit rack</h3>
             <RackHeightField value={height} onChange={setHeight} />
-            <button className="btn">Save rack height</button>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn">Save rack height</button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setRelocate({ kind: "rack", id: rid, mode: "copy" })}
+              >
+                Copy
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setRelocate({ kind: "rack", id: rid, mode: "move" })}
+              >
+                Move
+              </button>
+              <button
+                type="button"
+                className="btn danger"
+                onClick={() =>
+                  setPendingDelete({
+                    kind: "rack",
+                    id: rid,
+                    name: elev.rack.name,
+                    detail: `${elev.devices.length} device${elev.devices.length === 1 ? "" : "s"} in this rack will become unlocated.`,
+                  })
+                }
+              >
+                Delete
+              </button>
+            </div>
           </form>
           <form className="card" onSubmit={addDevice} style={{ marginTop: 12 }}>
             <h3>Add device to this rack</h3>
@@ -200,6 +241,19 @@ export default function RackPage() {
           </div>
         </div>
       </div>
+      {adding && (
+        <DeviceEditorModal
+          projectId={pid}
+          racks={racks}
+          initialDraft={adding}
+          showLocation={false}
+          onClose={() => setAdding(null)}
+          onSaved={() => {
+            setAdding(null);
+            load();
+          }}
+        />
+      )}
       {editing && (
         <DeviceEditorModal
           projectId={pid}
@@ -214,6 +268,15 @@ export default function RackPage() {
             setRelocate({ kind: "device", id: editing.id, mode });
             setEditing(null);
           }}
+          onDelete={() => {
+            setPendingDelete({
+              kind: "device",
+              id: editing.id,
+              name: editing.name,
+              detail: "This device will be removed from the project.",
+            });
+            setEditing(null);
+          }}
         />
       )}
       {relocate && (
@@ -224,6 +287,22 @@ export default function RackPage() {
           entityId={relocate.id}
           onClose={() => setRelocate(null)}
           onDone={load}
+        />
+      )}
+      {pendingDelete && (
+        <ConfirmDialog
+          title={`Delete ${pendingDelete.kind} “${pendingDelete.name}”?`}
+          message={pendingDelete.detail}
+          onClose={() => setPendingDelete(null)}
+          onConfirm={async () => {
+            if (pendingDelete.kind === "rack") {
+              await projects.deleteRack(pid, pendingDelete.id);
+              navigate(`/projects/${pid}?tab=racks`);
+            } else {
+              await projects.deleteDevice(pid, pendingDelete.id);
+              load();
+            }
+          }}
         />
       )}
     </div>

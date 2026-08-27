@@ -143,18 +143,24 @@ export const projects = {
     api<Area>(`/api/projects/${id}/areas`, { method: "POST", body: JSON.stringify(body) }),
   updateArea: (id: number, areaId: number, body: Partial<Area> & { name: string }) =>
     api<Area>(`/api/projects/${id}/areas/${areaId}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteArea: (id: number, areaId: number) =>
+    api<{ ok: boolean }>(`/api/projects/${id}/areas/${areaId}`, { method: "DELETE" }),
   rows: (id: number, areaId?: number) =>
     api<AisleRow[]>(`/api/projects/${id}/rows${areaId ? `?area_id=${areaId}` : ""}`),
   addRow: (id: number, body: Partial<AisleRow> & { name: string }) =>
     api<AisleRow>(`/api/projects/${id}/rows`, { method: "POST", body: JSON.stringify(body) }),
   updateRow: (id: number, rowId: number, body: Partial<AisleRow> & { name: string }) =>
     api<AisleRow>(`/api/projects/${id}/rows/${rowId}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteRow: (id: number, rowId: number) =>
+    api<{ ok: boolean }>(`/api/projects/${id}/rows/${rowId}`, { method: "DELETE" }),
   racks: (id: number) => api<Rack[]>(`/api/projects/${id}/racks`),
   addRack: (id: number, body: Partial<Rack> & { name: string }) =>
     api<Rack>(`/api/projects/${id}/racks`, { method: "POST", body: JSON.stringify(body) }),
   elevation: (pid: number, rid: number) => api<Elevation>(`/api/projects/${pid}/racks/${rid}/elevation`),
   updateRack: (pid: number, rid: number, body: Partial<Rack> & { name: string }) =>
     api<Rack>(`/api/projects/${pid}/racks/${rid}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteRack: (pid: number, rid: number) =>
+    api<{ ok: boolean }>(`/api/projects/${pid}/racks/${rid}`, { method: "DELETE" }),
   copyArea: (id: number, areaId: number, body: RelocateBody) =>
     api<Area>(`/api/projects/${id}/areas/${areaId}/copy`, { method: "POST", body: JSON.stringify(body) }),
   moveArea: (id: number, areaId: number, body: RelocateBody) =>
@@ -177,6 +183,8 @@ export const projects = {
     api<Device>(`/api/projects/${id}/devices`, { method: "POST", body: JSON.stringify(body) }),
   updateDevice: (pid: number, did: number, body: Partial<Device>) =>
     api<Device>(`/api/projects/${pid}/devices/${did}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteDevice: (pid: number, did: number) =>
+    api<{ ok: boolean }>(`/api/projects/${pid}/devices/${did}`, { method: "DELETE" }),
   search: (
     id: number,
     q = "",
