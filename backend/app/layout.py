@@ -108,7 +108,7 @@ def _copy_racks(
         db.flush()
         if include_devices:
             for device in db.query(Device).filter(Device.rack_id == rack.id).all():
-                db.add(_clone(device, project_id=project_id, rack_id=dest.id))
+                db.add(_clone(device, project_id=project_id, rack_id=dest.id, pdu_a_id=None, pdu_b_id=None))
 
 
 def _target_area(db: Session, project_id: int, area_id: Optional[int]) -> Area | None:
@@ -228,7 +228,7 @@ def apply_relocate(db: Session, kind: str, entity, body: RelocateIn, copy: bool)
             db.flush()
             if include_devices:
                 for device in db.query(Device).filter(Device.rack_id == entity.id).all():
-                    db.add(_clone(device, project_id=target_project_id, rack_id=clone.id))
+                    db.add(_clone(device, project_id=target_project_id, rack_id=clone.id, pdu_a_id=None, pdu_b_id=None))
             return clone
         orig_row_id = entity.row_id
         entity.project_id = target_project_id
@@ -248,12 +248,16 @@ def apply_relocate(db: Session, kind: str, entity, body: RelocateIn, copy: bool)
         dest_rack = _target_rack(db, target_project_id, body.target_rack_id)
         dest_rack_id = dest_rack.id if dest_rack else None
         if copy:
-            clone = _clone(entity, project_id=target_project_id, rack_id=dest_rack_id)
+            clone = _clone(entity, project_id=target_project_id, rack_id=dest_rack_id, pdu_a_id=None, pdu_b_id=None)
             db.add(clone)
             db.flush()
             return clone
+        old_rack_id = entity.rack_id
         entity.project_id = target_project_id
         entity.rack_id = dest_rack_id
+        if old_rack_id != dest_rack_id:
+            entity.pdu_a_id = None
+            entity.pdu_b_id = None
         return entity
 
     raise HTTPException(400, "Unknown relocate kind")

@@ -103,6 +103,18 @@ def _ensure_rack_fits(db: Session, rack_id: int | None, ru_end: int | None) -> N
         rack.ru_height = min(70, end)
 
 
+def _pdu_in_project(db: Session, project_id: int, pdu_id: int | None) -> int | None:
+    if not pdu_id:
+        return None
+    pdu = db.get(PDU, pdu_id)
+    if not pdu:
+        raise HTTPException(400, "PDU not found")
+    rack = db.get(Rack, pdu.rack_id)
+    if not rack or rack.project_id != project_id:
+        raise HTTPException(400, "PDU is not in this project")
+    return pdu.id
+
+
 def _get_area(db: Session, project_id: int, area_id: int) -> Area:
     area = db.get(Area, area_id)
     if not area or area.project_id != project_id:
@@ -624,7 +636,10 @@ async def import_inventory(
 @projects_router.post("/{project_id}/devices", response_model=DeviceOut, status_code=201)
 def create_device(project_id: int, body: DeviceIn, db: Session = Depends(get_db), user: User = Depends(WriteUser)):
     _get_project(db, project_id)
-    device = Device(project_id=project_id, captured_by=user.id, **body.model_dump())
+    data = body.model_dump()
+    data["pdu_a_id"] = _pdu_in_project(db, project_id, data.get("pdu_a_id"))
+    data["pdu_b_id"] = _pdu_in_project(db, project_id, data.get("pdu_b_id"))
+    device = Device(project_id=project_id, captured_by=user.id, **data)
     db.add(device)
     db.flush()
     _ensure_rack_fits(db, device.rack_id, device.ru_end)
@@ -645,7 +660,12 @@ def update_device(
     project_id: int, device_id: int, body: DevicePatch, db: Session = Depends(get_db), _: User = Depends(WriteUser)
 ):
     device = _get_device(db, project_id, device_id)
-    _apply(device, body.model_dump(exclude_unset=True))
+    data = body.model_dump(exclude_unset=True)
+    if "pdu_a_id" in data:
+        data["pdu_a_id"] = _pdu_in_project(db, project_id, data.get("pdu_a_id"))
+    if "pdu_b_id" in data:
+        data["pdu_b_id"] = _pdu_in_project(db, project_id, data.get("pdu_b_id"))
+    _apply(device, data)
     _ensure_rack_fits(db, device.rack_id, device.ru_end)
     learn_values(
         db,
@@ -679,6 +699,18 @@ def delete_device(project_id: int, device_id: int, db: Session = Depends(get_db)
     db.delete(device)
     db.commit()
     return {"ok": True}
+
+
+@projects_router.get("/{project_id}/pdus", response_model=list[PDUOut])
+def list_project_pdus(project_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    _get_project(db, project_id)
+    return (
+        db.query(PDU)
+        .join(Rack, PDU.rack_id == Rack.id)
+        .filter(Rack.project_id == project_id)
+        .order_by(PDU.name)
+        .all()
+    )
 
 
 @projects_router.get("/{project_id}/racks/{rack_id}/pdus", response_model=list[PDUOut])
