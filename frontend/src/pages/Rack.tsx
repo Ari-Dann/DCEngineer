@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AisleRow, Area, Device, Elevation, PDU, Rack, downloadAuth, layoutPath, projects, uploadPhotos } from "../api";
-import { formatPowerWatts, sumPowerWatts } from "../power";
+import { formatHierarchyPower, sumDcAmps, sumPowerWatts } from "../power";
 import {
   DeviceDraft,
   DeviceEditorModal,
@@ -118,7 +118,7 @@ export default function RackPage() {
           <h1>Rack {elev.rack.name}</h1>
           <p>
             {layoutPath(elev.rack, aisleRows, areas)} · {elev.rack.ru_height}U ·{" "}
-            {formatPowerWatts(sumPowerWatts(elev.devices, [rid]))}
+            {formatHierarchyPower(sumPowerWatts(elev.devices, [rid]), sumDcAmps(elev.devices, [rid]))}
           </p>
         </div>
         <button
@@ -203,6 +203,7 @@ export default function RackPage() {
               areas={areas}
               rows={aisleRows}
               devices={elev.devices}
+              pdus={pdus}
               showLocation={false}
               pendingPhotos={photos}
               onPendingPhotos={setPhotos}
@@ -281,6 +282,7 @@ export default function RackPage() {
           areas={areas}
           rows={aisleRows}
           devices={elev.devices}
+          pdus={pdus}
           initialDraft={adding}
           showLocation={false}
           onClose={() => setAdding(null)}
@@ -298,6 +300,7 @@ export default function RackPage() {
           areas={areas}
           rows={aisleRows}
           devices={elev.devices}
+          pdus={pdus}
           showLocation={false}
           onClose={() => setEditing(null)}
           onSaved={() => {

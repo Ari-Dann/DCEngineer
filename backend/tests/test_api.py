@@ -1321,3 +1321,58 @@ def test_device_power_draw_unit_roundtrip(client, auth):
     assert patched["power_draw_unit"] == "W"
 
 
+def test_device_ac_dc_power_and_dual_pdus(client, auth):
+    project = client.post("/api/projects", headers=auth, json={"name": "Feeds"}).json()
+    pid = project["id"]
+    rack = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "A01", "row_label": "A", "ru_height": 42},
+    ).json()
+    pdu_a = client.post(
+        f"/api/projects/{pid}/racks/{rack['id']}/pdus",
+        headers=auth,
+        json={"name": "PDU-A", "bank": "A", "outlet_count": 4},
+    ).json()
+    pdu_b = client.post(
+        f"/api/projects/{pid}/racks/{rack['id']}/pdus",
+        headers=auth,
+        json={"name": "PDU-B", "bank": "B", "outlet_count": 4},
+    ).json()
+    listed = client.get(f"/api/projects/{pid}/pdus", headers=auth)
+    assert listed.status_code == 200, listed.text
+    assert {p["name"] for p in listed.json()} == {"PDU-A", "PDU-B"}
+    device = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={
+            "name": "core-sw",
+            "rack_id": rack["id"],
+            "power_draw_watts": 1800,
+            "power_draw_unit": "kW",
+            "dc_power_draw_amps": 12.5,
+            "pdu_a_id": pdu_a["id"],
+            "pdu_b_id": pdu_b["id"],
+        },
+    ).json()
+    assert device["power_draw_watts"] == 1800
+    assert device["dc_power_draw_amps"] == 12.5
+    assert device["pdu_a_id"] == pdu_a["id"]
+    assert device["pdu_b_id"] == pdu_b["id"]
+    cleared = client.patch(
+        f"/api/projects/{pid}/devices/{device['id']}",
+        headers=auth,
+        json={"dc_power_draw_amps": 7, "pdu_b_id": None},
+    ).json()
+    assert cleared["dc_power_draw_amps"] == 7
+    assert cleared["pdu_a_id"] == pdu_a["id"]
+    assert cleared["pdu_b_id"] is None
+    bad = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={"name": "ghost", "pdu_a_id": 999999},
+    )
+    assert bad.status_code == 400
+
+
+

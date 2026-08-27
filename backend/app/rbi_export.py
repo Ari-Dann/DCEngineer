@@ -119,6 +119,8 @@ def build_rbi_workbook(db: Session, project: Project) -> bytes:
     )
     devices = db.query(Device).filter(Device.project_id == project.id).order_by(Device.rack_id, Device.ru_start).all()
     rack_by_id = {r.id: r for r in racks}
+    pdus = db.query(PDU).join(Rack).filter(Rack.project_id == project.id).all()
+    pdu_by_id = {p.id: p for p in pdus}
     for dev in devices:
         rack_name = rack_by_id[dev.rack_id].name if dev.rack_id and dev.rack_id in rack_by_id else ""
         elev.append(
@@ -158,6 +160,10 @@ def build_rbi_workbook(db: Session, project: Project) -> bytes:
             "Fan orientation",
             "LED / screen",
             "LED / screen color",
+            "AC power (W)",
+            "DC power (A)",
+            "PDU A",
+            "PDU B",
             "Mgmt IP",
             "Discovered via",
             "Undocumented",
@@ -190,6 +196,10 @@ def build_rbi_workbook(db: Session, project: Project) -> bytes:
             dev.fan_orientation,
             getattr(dev, "indicator_type", "") or "",
             getattr(dev, "indicator_color", "") or "",
+            getattr(dev, "power_draw_watts", None) if getattr(dev, "power_draw_watts", None) is not None else "",
+            getattr(dev, "dc_power_draw_amps", None) if getattr(dev, "dc_power_draw_amps", None) is not None else "",
+            pdu_by_id.get(getattr(dev, "pdu_a_id", None)).name if getattr(dev, "pdu_a_id", None) in pdu_by_id else "",
+            pdu_by_id.get(getattr(dev, "pdu_b_id", None)).name if getattr(dev, "pdu_b_id", None) in pdu_by_id else "",
             dev.management_ip,
             dev.discovered_via,
             "yes" if dev.undocumented else "no",
@@ -207,7 +217,6 @@ def build_rbi_workbook(db: Session, project: Project) -> bytes:
 
     pdu_sheet = wb.create_sheet("PDU Connectivity")
     _header(pdu_sheet, ["Rack", "PDU", "Bank", "Port", "Device", "Feed", "Amps", "Volts", "Notes"])
-    pdus = db.query(PDU).join(Rack).filter(Rack.project_id == project.id).all()
     device_by_id = {d.id: d for d in devices}
     for pdu in pdus:
         rack_name = rack_by_id.get(pdu.rack_id).name if pdu.rack_id in rack_by_id else ""

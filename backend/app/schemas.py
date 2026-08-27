@@ -170,6 +170,9 @@ class DeviceIn(BaseModel):
     indicator_color: str = "unknown"
     power_draw_watts: Optional[int] = None
     power_draw_unit: Literal["W", "kW"] = "W"
+    dc_power_draw_amps: Optional[float] = None
+    pdu_a_id: Optional[int] = None
+    pdu_b_id: Optional[int] = None
     management_ip: str = ""
     discovered_via: str = "physical"
     undocumented: bool = False
@@ -205,6 +208,9 @@ class DevicePatch(BaseModel):
     indicator_color: Optional[str] = None
     power_draw_watts: Optional[int] = None
     power_draw_unit: Optional[Literal["W", "kW"]] = None
+    dc_power_draw_amps: Optional[float] = None
+    pdu_a_id: Optional[int] = None
+    pdu_b_id: Optional[int] = None
     management_ip: Optional[str] = None
     discovered_via: Optional[str] = None
     undocumented: Optional[bool] = None
