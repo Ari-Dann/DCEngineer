@@ -15,7 +15,7 @@ from openpyxl import load_workbook
 from sqlalchemy.orm import Session
 
 from app.catalog import DEVICE_TYPES, IMPORT_FIELDS, learn_values
-from app.layout import apply_row_to_rack, resolve_or_create_row
+from app.layout import apply_row_to_rack
 from app.models import AisleRow, Area, Device, Rack
 
 HEADER_MAP = {
@@ -44,7 +44,23 @@ HEADER_MAP = {
 
 KNOWN_FIELDS = {f["id"] for f in IMPORT_FIELDS}
 PREFERRED_SHEETS = ("devices", "device list", "inventory", "assets", "equipment", "elevations")
+GENERIC_SHEET_NAMES = {
+    *PREFERRED_SHEETS,
+    "cover",
+    "revision control",
+    "racks",
+    "pdu connectivity",
+    "cabling",
+    "lifecycle",
+    "remediation",
+    "handoffs",
+    "layout",
+    "sheet1",
+    "sheet2",
+    "sheet3",
+}
 KNOWN_TYPES = {t.lower() for t in DEVICE_TYPES}
+_BLANK_TEXT = {"", "unknown", "n/a", "na", "none", "-"}
 
 
 def _norm(value: Any) -> str:
@@ -366,6 +382,7 @@ def _empty_result(errors: list[str] | None = None) -> dict:
         "racks_created": 0,
         "areas_created": 0,
         "rows_created": 0,
+        "preserved": 0,
         "skipped": 0,
         "rows": 0,
         "errors": errors or [],
@@ -373,6 +390,239 @@ def _empty_result(errors: list[str] | None = None) -> dict:
         "sheet": "",
         "orientation": "rows",
     }
+
+
+def _is_generic_sheet(name: str) -> bool:
+    label = (name or "").strip().lower()
+    if label in GENERIC_SHEET_NAMES:
+        return True
+    # CSV/TXT uploads use the filename as the sheet title; that is not an area or row.
+    return label.endswith((".csv", ".txt", ".xlsx", ".ods", ".xls"))
+
+
+def _has_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str) and value.strip().lower() in _BLANK_TEXT:
+        return False
+    return True
+
+
+def _sheet_hierarchy_hint(sheet_name: str) -> str:
+    label = (sheet_name or "").strip()
+    if not label or _is_generic_sheet(label):
+        return ""
+    return label
+
+
+def _path_label(area: Area | None, aisle: AisleRow | None, rack: Rack | None) -> str:
+    return " / ".join(part for part in (area.name if area else "", aisle.name if aisle else "", rack.name if rack else "") if part)
+
+
+class _HierarchyIndex:
+    """Match import records to existing layout without stealing items from another parent."""
+
+    def __init__(self, db: Session, project_id: int, default_area: Area | None):
+        self.db = db
+        self.project_id = project_id
+        self.default_area = default_area
+        self.areas_created = 0
+        self.rows_created = 0
+        self.racks_created = 0
+        self.areas: dict[str, Area] = {
+            a.name.lower(): a for a in db.query(Area).filter(Area.project_id == project_id).all()
+        }
+        self.rows: list[AisleRow] = db.query(AisleRow).filter(AisleRow.project_id == project_id).all()
+        self.racks: list[Rack] = db.query(Rack).filter(Rack.project_id == project_id).all()
+        self.devices: list[Device] = db.query(Device).filter(Device.project_id == project_id).all()
+
+    def area(self, name: str) -> Area | None:
+        label = (name or "").strip()
+        if not label:
+            return self.default_area
+        key = label.lower()
+        found = self.areas.get(key)
+        if found:
+            return found
+        found = Area(project_id=self.project_id, name=label)
+        self.db.add(found)
+        self.db.flush()
+        self.areas[key] = found
+        self.areas_created += 1
+        return found
+
+    def row(self, name: str, area: Area | None) -> AisleRow | None:
+        label = (name or "").strip()
+        if not label:
+            return None
+        key = label.lower()
+        if area:
+            for row in self.rows:
+                if row.area_id == area.id and row.name.lower() == key:
+                    return row
+        else:
+            for row in self.rows:
+                if row.area_id is None and row.name.lower() == key:
+                    return row
+        row = AisleRow(project_id=self.project_id, area_id=area.id if area else None, name=label)
+        self.db.add(row)
+        self.db.flush()
+        self.rows.append(row)
+        self.rows_created += 1
+        return row
+
+    def rack(self, name: str, aisle: AisleRow | None, area: Area | None) -> Rack | None:
+        label = (name or "").strip()
+        if not label:
+            return None
+        key = label.lower()
+        area_id = area.id if area else None
+        named = [rack for rack in self.racks if rack.name.lower() == key]
+        found: Rack | None = None
+        if aisle:
+            in_row = [rack for rack in named if rack.row_id == aisle.id]
+            if in_row:
+                found = in_row[0]
+            else:
+                unassigned = [
+                    rack
+                    for rack in named
+                    if rack.row_id is None
+                    and (rack.area_id == area_id or (rack.area_id is None and area_id is None))
+                ]
+                if unassigned:
+                    found = unassigned[0]
+                    apply_row_to_rack(found, aisle, area_id)
+        elif area_id:
+            in_area = [rack for rack in named if rack.area_id == area_id]
+            if len(in_area) == 1:
+                found = in_area[0]
+            else:
+                unassigned = [rack for rack in in_area if rack.row_id is None]
+                if len(unassigned) == 1:
+                    found = unassigned[0]
+        else:
+            if len(named) == 1:
+                found = named[0]
+            else:
+                unassigned = [rack for rack in named if rack.row_id is None and rack.area_id is None]
+                if len(unassigned) == 1:
+                    found = unassigned[0]
+        if found:
+            return found
+        rack = Rack(
+            project_id=self.project_id,
+            name=label,
+            ru_height=42,
+            area_id=aisle.area_id if aisle and aisle.area_id is not None else area_id,
+            row_id=aisle.id if aisle else None,
+            row_label=aisle.name if aisle else "",
+        )
+        self.db.add(rack)
+        self.db.flush()
+        self.racks.append(rack)
+        self.racks_created += 1
+        return rack
+
+    def device(self, *, serial: str, name: str, rack: Rack | None) -> Device | None:
+        serial_key = (serial or "").strip().lower()
+        name_key = (name or "").strip().lower()
+        if rack and serial_key:
+            for device in self.devices:
+                if device.rack_id == rack.id and (device.serial or "").strip().lower() == serial_key:
+                    return device
+        if rack and name_key:
+            for device in self.devices:
+                if device.rack_id == rack.id and (device.name or "").strip().lower() == name_key:
+                    existing_serial = (device.serial or "").strip().lower()
+                    if serial_key and existing_serial and existing_serial != serial_key:
+                        continue
+                    return device
+        if serial_key:
+            for device in self.devices:
+                if (device.serial or "").strip().lower() == serial_key:
+                    return device
+        return None
+
+    def remember(self, device: Device) -> None:
+        self.devices.append(device)
+
+
+def _hierarchy_for_record(
+    index: _HierarchyIndex,
+    row: dict[str, str],
+    sheet_name: str,
+) -> tuple[Area | None, AisleRow | None, Rack | None]:
+    explicit_area = (row.get("area") or "").strip()
+    explicit_row = (row.get("row") or "").strip()
+    rack_name = (row.get("rack") or "").strip()
+    hint = _sheet_hierarchy_hint(sheet_name)
+    if explicit_area:
+        area = index.area(explicit_area)
+        row_name = explicit_row or (hint if hint.lower() != explicit_area.lower() else "")
+    elif index.default_area:
+        area = index.default_area
+        row_name = explicit_row or hint
+    elif hint:
+        area = index.area(hint)
+        row_name = explicit_row
+    else:
+        area = None
+        row_name = explicit_row
+    aisle = index.row(row_name, area) if row_name else None
+    rack = index.rack(rack_name, aisle, area) if rack_name else None
+    return area, aisle, rack
+
+
+def _device_payload(row: dict[str, str], name: str, rack: Rack | None) -> dict[str, Any]:
+    ru_start = _int(row.get("ru_start", ""))
+    ru_end = _int(row.get("ru_end", ""))
+    height = _int(row.get("ru_height", ""))
+    if ru_start is not None and ru_end is None and height:
+        ru_end = ru_start + height - 1
+    serial = (row.get("serial") or "").strip()
+    payload: dict[str, Any] = {
+        "name": name[:255],
+        "serial": serial[:128],
+        "discovered_via": "import",
+    }
+    if rack:
+        payload["rack_id"] = rack.id
+    mapped = {
+        "hostname": (row.get("hostname") or "")[:255],
+        "vendor": (row.get("vendor") or "")[:128],
+        "model": (row.get("model") or "")[:128],
+        "asset_tag": (row.get("asset_tag") or "")[:128],
+        "function": (row.get("function") or "")[:255],
+        "management_ip": (row.get("management_ip") or "")[:64],
+        "notes": row.get("notes") or "",
+        "eol_date": row.get("eol_date") or None,
+        "eos_date": row.get("eos_date") or None,
+        "fan_orientation": (row.get("fan_orientation") or "")[:64],
+        "indicator_type": (row.get("indicator_type") or "")[:32],
+        "indicator_color": (row.get("indicator_color") or "")[:32],
+    }
+    for key, value in mapped.items():
+        if _has_value(value):
+            payload[key] = value
+    if _has_value(row.get("device_type")):
+        payload["device_type"] = _normalize_type(row.get("device_type", ""))[:64]
+    if ru_start is not None:
+        payload["ru_start"] = ru_start
+    if ru_end is not None:
+        payload["ru_end"] = ru_end
+    return payload
+
+
+def _apply_payload(device: Device, payload: dict[str, Any], *, allow_rack: bool) -> None:
+    for key, value in payload.items():
+        if key == "discovered_via":
+            continue
+        if key == "rack_id" and not allow_rack:
+            continue
+        if not _has_value(value) and value not in (0, False):
+            continue
+        setattr(device, key, value)
 
 
 def import_devices(
@@ -387,165 +637,150 @@ def import_devices(
     header_index: int | None = None,
     mapping: dict[str, int] | str | None = None,
     default_area_id: int | None = None,
+    all_sheets: bool = False,
 ) -> dict:
     parsed = parse_workbook(filename, data)
     if not parsed:
         return _empty_result(["File contained no rows"])
 
-    chosen = sheet or pick_sheet([describe_sheet(n, g) for n, g in parsed])
-    grid = next((g for n, g in parsed if n == chosen), parsed[0][1])
-    used_sheet = next((n for n, g in parsed if n == chosen), parsed[0][0])
-    orientation = orientation or detect_orientation(grid)
-    if header_index is None:
-        header_index = _best_header_index(grid, orientation)
-    used_mapping = _parse_mapping(mapping)
-    rows = records_from_grid(grid, orientation, header_index, used_mapping)
-
-    created = 0
-    updated = 0
-    racks_created = 0
-    areas_created = 0
-    rows_created = 0
-    skipped = 0
-    errors: list[str] = []
-    names: list[str] = []
-    rack_cache: dict[str, Rack] = {
-        r.name.lower(): r for r in db.query(Rack).filter(Rack.project_id == project_id).all()
-    }
-    area_cache: dict[str, Area] = {
-        a.name.lower(): a for a in db.query(Area).filter(Area.project_id == project_id).all()
-    }
-    existing_row_ids = {
-        r.id for r in db.query(AisleRow).filter(AisleRow.project_id == project_id).all()
-    }
+    described = [describe_sheet(n, g) for n, g in parsed]
+    chosen = sheet or pick_sheet(described)
     default_area = None
     if default_area_id:
         default_area = db.get(Area, default_area_id)
         if not default_area or default_area.project_id != project_id:
             return _empty_result(["Default area was not found in this project"])
 
-    def ensure_area(area_name: str) -> Area | None:
-        nonlocal areas_created
-        label = (area_name or "").strip()
-        if not label:
-            return default_area
-        key = label.lower()
-        area = area_cache.get(key)
-        if area:
-            return area
-        area = Area(project_id=project_id, name=label)
-        db.add(area)
-        db.flush()
-        area_cache[key] = area
-        areas_created += 1
-        return area
+    if all_sheets:
+        targets = [(n, g) for n, g in parsed if any(any(cell for cell in row) for row in g)]
+    else:
+        grid = next((g for n, g in parsed if n == chosen), parsed[0][1])
+        used_sheet = next((n for n, g in parsed if n == chosen), parsed[0][0])
+        targets = [(used_sheet, grid)]
 
-    for index, row in enumerate(rows, start=2):
-        name = row.get("name") or row.get("hostname") or row.get("serial")
-        area_name = (row.get("area") or "").strip()
-        row_name = (row.get("row") or "").strip()
-        rack_name = (row.get("rack") or "").strip()
-        if not name and not area_name and not row_name and not rack_name:
-            skipped += 1
+    used_mapping = _parse_mapping(mapping)
+    index = _HierarchyIndex(db, project_id, default_area)
+    created = 0
+    updated = 0
+    preserved = 0
+    skipped = 0
+    errors: list[str] = []
+    names: list[str] = []
+    total_rows = 0
+    orientations: list[str] = []
+    sheet_names: list[str] = []
+
+    for sheet_name, grid in targets:
+        sheet_orientation = orientation if (not all_sheets or sheet_name == chosen) else None
+        sheet_orientation = sheet_orientation or detect_orientation(grid)
+        sheet_header = header_index if (not all_sheets or sheet_name == chosen) else None
+        if sheet_header is None:
+            sheet_header = _best_header_index(grid, sheet_orientation)
+        sheet_mapping = used_mapping if (not all_sheets or sheet_name == chosen) else None
+        records = records_from_grid(grid, sheet_orientation, sheet_header, sheet_mapping)
+        if not records:
             continue
+        total_rows += len(records)
+        orientations.append(sheet_orientation)
+        sheet_names.append(sheet_name)
 
-        area = ensure_area(area_name)
-        area_id = area.id if area else None
-        aisle = None
-        if row_name:
-            aisle = resolve_or_create_row(db, project_id, row_label=row_name, area_id=area_id)
-            if aisle and aisle.id not in existing_row_ids:
-                existing_row_ids.add(aisle.id)
-                rows_created += 1
-            if aisle and area_id and aisle.area_id is None:
-                aisle.area_id = area_id
+        # Pass 1: Area → Row → Rack so later device rows never re-parent populated layout.
+        for row in records:
+            if not any((row.get("area"), row.get("row"), row.get("rack"), row.get("name"), row.get("hostname"), row.get("serial"))):
+                continue
+            _hierarchy_for_record(index, row, sheet_name)
 
-        rack = None
-        if rack_name:
-            key = rack_name.lower()
-            rack = rack_cache.get(key)
-            if not rack:
-                rack = Rack(project_id=project_id, name=rack_name, ru_height=42)
-                db.add(rack)
-                db.flush()
-                rack_cache[key] = rack
-                racks_created += 1
-            apply_row_to_rack(rack, aisle, area_id)
+        # Pass 2: devices, matched only after hierarchy is resolved.
+        for offset, row in enumerate(records, start=2):
+            name = (row.get("name") or row.get("hostname") or row.get("serial") or "").strip()
+            area_name = (row.get("area") or "").strip()
+            row_name = (row.get("row") or "").strip()
+            rack_name = (row.get("rack") or "").strip()
+            if not name and not area_name and not row_name and not rack_name:
+                skipped += 1
+                continue
+            _area, _aisle, rack = _hierarchy_for_record(index, row, sheet_name)
+            if not name:
+                continue
+            ru_end = _int(row.get("ru_end", ""))
+            height = _int(row.get("ru_height", ""))
+            ru_start = _int(row.get("ru_start", ""))
+            if ru_start is not None and ru_end is None and height:
+                ru_end = ru_start + height - 1
+            if rack and ru_end and ru_end > rack.ru_height:
+                rack.ru_height = min(70, ru_end)
 
-        if not name:
-            continue
-
-        ru_start = _int(row.get("ru_start", ""))
-        ru_end = _int(row.get("ru_end", ""))
-        height = _int(row.get("ru_height", ""))
-        if ru_start is not None and ru_end is None and height:
-            ru_end = ru_start + height - 1
-        if rack and ru_end and ru_end > rack.ru_height:
-            rack.ru_height = min(70, ru_end)
-
-        dtype = _normalize_type(row.get("device_type", ""))
-        serial = row.get("serial", "")
-        existing = None
-        if serial:
-            existing = (
-                db.query(Device)
-                .filter(Device.project_id == project_id, Device.serial == serial)
-                .first()
-            )
-        payload = dict(
-            name=name[:255],
-            hostname=row.get("hostname", "")[:255],
-            vendor=row.get("vendor", "")[:128],
-            model=row.get("model", "")[:128],
-            serial=serial[:128],
-            asset_tag=row.get("asset_tag", "")[:128],
-            device_type=dtype[:64],
-            function=row.get("function", "")[:255],
-            ru_start=ru_start,
-            ru_end=ru_end,
-            rack_id=rack.id if rack else None,
-            management_ip=row.get("management_ip", "")[:64],
-            notes=row.get("notes", ""),
-            eol_date=row.get("eol_date") or None,
-            eos_date=row.get("eos_date") or None,
-            fan_orientation=row.get("fan_orientation") or "unknown",
-            indicator_type=(row.get("indicator_type") or "unknown")[:32],
-            indicator_color=(row.get("indicator_color") or "unknown")[:32],
-            discovered_via="import",
-        )
-        try:
-            if existing:
-                for key, value in payload.items():
-                    setattr(existing, key, value)
-                updated += 1
-            else:
-                db.add(Device(project_id=project_id, captured_by=user_id, **payload))
-                created += 1
-            names.append(payload["name"])
-            learn_values(
-                db,
-                vendor=payload["vendor"],
-                model=payload["model"],
-                device_type=payload["device_type"],
-                function=payload["function"],
-            )
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"Row {index}: {exc}")
-            skipped += 1
+            payload = _device_payload(row, name, rack)
+            existing = index.device(serial=payload.get("serial") or "", name=name, rack=rack)
+            try:
+                if existing:
+                    located_elsewhere = bool(rack and existing.rack_id and existing.rack_id != rack.id)
+                    if located_elsewhere:
+                        current_rack = next((r for r in index.racks if r.id == existing.rack_id), None)
+                        current_area = next(
+                            (a for a in index.areas.values() if current_rack and a.id == current_rack.area_id),
+                            None,
+                        )
+                        current_row = next(
+                            (r for r in index.rows if current_rack and r.id == current_rack.row_id),
+                            None,
+                        )
+                        preserved += 1
+                        errors.append(
+                            f"{sheet_name} row {offset}: serial already at {_path_label(current_area, current_row, current_rack)}; left in place"
+                        )
+                        continue
+                    allow_rack = not rack or existing.rack_id in (None, rack.id)
+                    _apply_payload(existing, payload, allow_rack=allow_rack)
+                    if allow_rack and rack and existing.rack_id is None:
+                        existing.rack_id = rack.id
+                    updated += 1
+                else:
+                    defaults = dict(
+                        hostname="",
+                        vendor="",
+                        model="",
+                        asset_tag="",
+                        device_type="server",
+                        function="",
+                        management_ip="",
+                        notes="",
+                        fan_orientation="unknown",
+                        indicator_type="unknown",
+                        indicator_color="unknown",
+                    )
+                    defaults.update(payload)
+                    device = Device(project_id=project_id, captured_by=user_id, **defaults)
+                    db.add(device)
+                    db.flush()
+                    index.remember(device)
+                    created += 1
+                names.append(payload["name"])
+                learn_values(
+                    db,
+                    vendor=payload.get("vendor") or "",
+                    model=payload.get("model") or "",
+                    device_type=payload.get("device_type") or "",
+                    function=payload.get("function") or "",
+                )
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{sheet_name} row {offset}: {exc}")
+                skipped += 1
 
     db.commit()
     return {
         "created": created,
         "updated": updated,
-        "racks_created": racks_created,
-        "areas_created": areas_created,
-        "rows_created": rows_created,
+        "racks_created": index.racks_created,
+        "areas_created": index.areas_created,
+        "rows_created": index.rows_created,
+        "preserved": preserved,
         "skipped": skipped,
-        "rows": len(rows),
+        "rows": total_rows,
         "errors": errors[:20],
         "names": names[:25],
-        "sheet": used_sheet,
-        "orientation": orientation,
+        "sheet": ", ".join(sheet_names),
+        "orientation": orientations[0] if orientations else "rows",
     }
 
 

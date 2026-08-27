@@ -154,6 +154,9 @@ export default function Project() {
     const placed = result.created + result.updated;
     const sheet = result.sheet ? ` from “${result.sheet}”` : "";
     const names = result.names?.length ? ` First records: ${result.names.slice(0, 8).join(", ")}.` : "";
+    const preserved = result.preserved
+      ? ` ${result.preserved} existing item${result.preserved === 1 ? "" : "s"} left in place.`
+      : "";
     const layout = [
       result.areas_created ? `${result.areas_created} area${result.areas_created === 1 ? "" : "s"}` : "",
       result.rows_created ? `${result.rows_created} row${result.rows_created === 1 ? "" : "s"}` : "",
@@ -163,11 +166,11 @@ export default function Project() {
       .join(", ");
     if (placed === 0 && !layout) {
       setImportMsg(
-        `Read ${result.rows} row${result.rows === 1 ? "" : "s"}${sheet} but none became devices (${result.skipped} skipped). Check the column mapping.`,
+        `Read ${result.rows} row${result.rows === 1 ? "" : "s"}${sheet} but none became devices (${result.skipped} skipped).${preserved || " Check the column mapping."}`,
       );
     } else {
       setImportMsg(
-        `Imported${sheet}: ${result.created} created, ${result.updated} updated${layout ? `, layout ${layout}` : ""}, ${result.skipped} skipped.${names}`,
+        `Imported${sheet}: ${result.created} created, ${result.updated} updated${layout ? `, layout ${layout}` : ""}, ${result.skipped} skipped.${preserved}${names}`,
       );
     }
     if (result.errors.length) setError(result.errors.join(" · "));

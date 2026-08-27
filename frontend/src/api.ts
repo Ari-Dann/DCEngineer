@@ -217,6 +217,7 @@ export const projects = {
     if (opts?.header_index != null) fd.append("header_index", String(opts.header_index));
     if (opts?.mapping) fd.append("mapping", JSON.stringify(opts.mapping));
     if (opts?.default_area_id) fd.append("default_area_id", String(opts.default_area_id));
+    if (opts?.all_sheets) fd.append("all_sheets", "true");
     return api<ImportResult>(`/api/projects/${id}/import`, { method: "POST", body: fd });
   },
   pdus: (pid: number, rid: number) => api<PDU[]>(`/api/projects/${pid}/racks/${rid}/pdus`),
@@ -301,6 +302,7 @@ export type ImportResult = {
   racks_created: number;
   areas_created?: number;
   rows_created?: number;
+  preserved?: number;
   skipped: number;
   rows: number;
   errors: string[];
@@ -333,6 +335,7 @@ export type ImportOptions = {
   header_index?: number;
   mapping?: Record<string, number>;
   default_area_id?: number;
+  all_sheets?: boolean;
 };
 
 async function authFetch(path: string, init: RequestInit = {}) {

@@ -237,7 +237,9 @@ Hall A,Row 2,,,
 Hall A,Row 3,A03,,,
 ```
 
-If the sheet contains **Area** and **Row/Aisle** columns, the import creates that layout and fills the area even when some lines have no device. Rows with a matching serial are updated; others are created. Missing rack names are created (default 42U, grown if the RU is higher). Devices with no rack stay **unlocated** until you assign them under **Locate** or Capture.
+If the sheet contains **Area** and **Row/Aisle** columns, the import creates that layout and fills the area even when some lines have no device. Matching follows **Area → Row → Rack → Device**: a row is matched only inside its area, a rack only inside that row (or an unassigned rack in the same area), and a device serial that already lives in a different rack is left in place rather than moved. Empty or “unknown” cells do not blank fields that are already filled. Missing rack names are created (default 42U, grown if the RU is higher). Devices with no rack stay **unlocated** until you assign them under **Locate** or Capture.
+
+Workbooks with several sheets import **one sheet by default** (the Devices sheet in an RBI export). Check **Import every sheet** to load the entire file. A sheet named Hall A or Row 1 is used as the area (or as the row when a default area is set) unless the name is generic (`Devices`, `Cover`, `Inventory`, `Sheet1`, …).
 
 Only an **Admin** can rename or delete an entire project.
 

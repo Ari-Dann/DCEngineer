@@ -1005,3 +1005,228 @@ def test_import_ods_and_default_area_layout(client, auth):
     assert {r["name"] for r in racks} >= {"C01", "C02"}
     assert all(r["area_id"] == area["id"] for r in racks if r["name"] in {"C01", "C02"})
 
+
+def _xlsx_bytes(sheets):
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    first = True
+    for title, headers, rows in sheets:
+        ws = wb.active if first else wb.create_sheet(title)
+        if first:
+            ws.title = title
+            first = False
+        ws.append(headers)
+        for row in rows:
+            ws.append(row)
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_import_does_not_steal_populated_rows_across_areas(client, auth):
+    project = client.post("/api/projects", headers=auth, json={"name": "Hierarchy halls"}).json()
+    pid = project["id"]
+    hall_a = (
+        "area,aisle,rack,name,serial,vendor,model\n"
+        "Hall A,Row 1,A01,core-a,SN-HALL-A,Cisco,C9300\n"
+        "Hall A,Row 1,A02,leaf-a,SN-LEAF-A,Arista,7050\n"
+    )
+    first = client.post(
+        f"/api/projects/{pid}/import",
+        headers=auth,
+        files={"file": ("hall-a.csv", hall_a.encode(), "text/csv")},
+    )
+    assert first.status_code == 200, first.text
+    areas = {a["name"]: a for a in client.get(f"/api/projects/{pid}/areas", headers=auth).json()}
+    assert "Hall A" in areas
+    rows = client.get(f"/api/projects/{pid}/rows", headers=auth).json()
+    row_a = next(r for r in rows if r["name"] == "Row 1" and r["area_id"] == areas["Hall A"]["id"])
+    racks = client.get(f"/api/projects/{pid}/racks", headers=auth).json()
+    hall_a_racks = {r["name"]: r for r in racks if r["row_id"] == row_a["id"]}
+    assert set(hall_a_racks) >= {"A01", "A02"}
+    a01_id = hall_a_racks["A01"]["id"]
+    core = next(d for d in client.get(f"/api/projects/{pid}/devices", headers=auth).json() if d["serial"] == "SN-HALL-A")
+    assert core["rack_id"] == a01_id
+    assert core["vendor"] == "Cisco"
+
+    hall_b = (
+        "area,aisle,rack,name,serial,vendor,model\n"
+        "Hall B,Row 1,A01,core-b,SN-HALL-B,Juniper,EX4400\n"
+        "Hall B,Row 1,A02,leaf-b,SN-LEAF-B,Dell,R750\n"
+    )
+    second = client.post(
+        f"/api/projects/{pid}/import",
+        headers=auth,
+        files={"file": ("hall-b.csv", hall_b.encode(), "text/csv")},
+    )
+    assert second.status_code == 200, second.text
+    areas = {a["name"]: a for a in client.get(f"/api/projects/{pid}/areas", headers=auth).json()}
+    assert "Hall A" in areas and "Hall B" in areas
+    rows = client.get(f"/api/projects/{pid}/rows", headers=auth).json()
+    row_a_again = next(r for r in rows if r["name"] == "Row 1" and r["area_id"] == areas["Hall A"]["id"])
+    row_b = next(r for r in rows if r["name"] == "Row 1" and r["area_id"] == areas["Hall B"]["id"])
+    assert row_a_again["id"] == row_a["id"]
+    racks = client.get(f"/api/projects/{pid}/racks", headers=auth).json()
+    hall_a_racks = [r for r in racks if r["row_id"] == row_a["id"]]
+    hall_b_racks = [r for r in racks if r["row_id"] == row_b["id"]]
+    assert {r["name"] for r in hall_a_racks} >= {"A01", "A02"}
+    assert {r["name"] for r in hall_b_racks} >= {"A01", "A02"}
+    assert {r["id"] for r in hall_a_racks}.isdisjoint({r["id"] for r in hall_b_racks})
+    devices = {d["serial"]: d for d in client.get(f"/api/projects/{pid}/devices", headers=auth).json()}
+    assert devices["SN-HALL-A"]["rack_id"] == a01_id
+    assert devices["SN-HALL-A"]["vendor"] == "Cisco"
+    b01 = next(r for r in hall_b_racks if r["name"] == "A01")
+    assert devices["SN-HALL-B"]["rack_id"] == b01["id"]
+
+
+def test_import_all_sheets_named_halls_without_stealing(client, auth):
+    xlsx = _xlsx_bytes(
+        [
+            ("Hall A", ["Aisle", "Rack", "Name", "Serial", "Vendor"], [["Row 1", "A01", "sw-a", "SN-SHEET-A", "Cisco"]]),
+            ("Hall B", ["Aisle", "Rack", "Name", "Serial", "Vendor"], [["Row 1", "A01", "sw-b", "SN-SHEET-B", "Juniper"]]),
+        ]
+    )
+    project = client.post("/api/projects", headers=auth, json={"name": "Multi sheet halls"}).json()
+    pid = project["id"]
+
+    default_import = client.post(
+        f"/api/projects/{pid}/import",
+        headers=auth,
+        files={
+            "file": (
+                "halls.xlsx",
+                xlsx,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert default_import.status_code == 200, default_import.text
+    assert default_import.json()["sheet"] == "Hall A"
+    areas = [a["name"] for a in client.get(f"/api/projects/{pid}/areas", headers=auth).json()]
+    assert "Hall A" in areas
+    assert "Hall B" not in areas
+
+    imported = client.post(
+        f"/api/projects/{pid}/import",
+        headers=auth,
+        data={"all_sheets": "true"},
+        files={
+            "file": (
+                "halls.xlsx",
+                xlsx,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert imported.status_code == 200, imported.text
+    summary = imported.json()
+    assert "Hall A" in summary["sheet"] and "Hall B" in summary["sheet"]
+    areas = {a["name"]: a for a in client.get(f"/api/projects/{pid}/areas", headers=auth).json()}
+    assert "Hall A" in areas and "Hall B" in areas
+    rows = client.get(f"/api/projects/{pid}/rows", headers=auth).json()
+    row_a = next(r for r in rows if r["name"] == "Row 1" and r["area_id"] == areas["Hall A"]["id"])
+    row_b = next(r for r in rows if r["name"] == "Row 1" and r["area_id"] == areas["Hall B"]["id"])
+    racks = client.get(f"/api/projects/{pid}/racks", headers=auth).json()
+    a01_a = next(r for r in racks if r["name"] == "A01" and r["row_id"] == row_a["id"])
+    a01_b = next(r for r in racks if r["name"] == "A01" and r["row_id"] == row_b["id"])
+    assert a01_a["id"] != a01_b["id"]
+    devices = {d["serial"]: d for d in client.get(f"/api/projects/{pid}/devices", headers=auth).json()}
+    assert devices["SN-SHEET-A"]["rack_id"] == a01_a["id"]
+    assert devices["SN-SHEET-B"]["rack_id"] == a01_b["id"]
+
+
+def test_import_preserves_serial_in_other_location(client, auth):
+    project = client.post("/api/projects", headers=auth, json={"name": "Preserve serial"}).json()
+    pid = project["id"]
+    first = client.post(
+        f"/api/projects/{pid}/import",
+        headers=auth,
+        files={
+            "file": (
+                "hall-a.csv",
+                b"area,aisle,rack,name,serial,vendor\nHall A,Row 1,A01,core-a,SN-SHARED,Cisco\n",
+                "text/csv",
+            )
+        },
+    )
+    assert first.status_code == 200, first.text
+    original = next(d for d in client.get(f"/api/projects/{pid}/devices", headers=auth).json() if d["serial"] == "SN-SHARED")
+    original_rack = original["rack_id"]
+    second = client.post(
+        f"/api/projects/{pid}/import",
+        headers=auth,
+        files={
+            "file": (
+                "hall-b.csv",
+                b"area,aisle,rack,name,serial,vendor\nHall B,Row 1,A01,core-b,SN-SHARED,Juniper\n",
+                "text/csv",
+            )
+        },
+    )
+    assert second.status_code == 200, second.text
+    summary = second.json()
+    assert summary["preserved"] >= 1
+    assert summary["created"] == 0
+    devices = [d for d in client.get(f"/api/projects/{pid}/devices", headers=auth).json() if d["serial"] == "SN-SHARED"]
+    assert len(devices) == 1
+    kept = devices[0]
+    assert kept["id"] == original["id"]
+    assert kept["rack_id"] == original_rack
+    assert kept["vendor"] == "Cisco"
+    assert kept["name"] == "core-a"
+    areas = {a["name"]: a for a in client.get(f"/api/projects/{pid}/areas", headers=auth).json()}
+    assert "Hall B" in areas
+    rows = client.get(f"/api/projects/{pid}/rows", headers=auth).json()
+    row_b = next(r for r in rows if r["name"] == "Row 1" and r["area_id"] == areas["Hall B"]["id"])
+    racks = client.get(f"/api/projects/{pid}/racks", headers=auth).json()
+    assert any(r["name"] == "A01" and r["row_id"] == row_b["id"] for r in racks)
+
+
+def test_import_empty_cells_do_not_blank_device_fields(client, auth):
+    project = client.post("/api/projects", headers=auth, json={"name": "Keep fields"}).json()
+    pid = project["id"]
+    rack = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "A01", "row_label": "A", "ru_height": 42},
+    ).json()
+    device = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={
+            "name": "core-keep",
+            "rack_id": rack["id"],
+            "hostname": "old-host",
+            "vendor": "Cisco",
+            "model": "C9300",
+            "serial": "SN-KEEP",
+            "function": "access",
+            "notes": "keep me",
+            "fan_orientation": "front-to-back",
+            "indicator_type": "led",
+            "indicator_color": "green",
+        },
+    ).json()
+    csv_body = (
+        "name,serial,rack,vendor,model,notes,function,hostname,fan_orientation,type\n"
+        "core-keep,SN-KEEP,A01,,,,,core-keep-host,unknown,\n"
+    )
+    imported = client.post(
+        f"/api/projects/{pid}/import",
+        headers=auth,
+        files={"file": ("blank.csv", csv_body.encode(), "text/csv")},
+    )
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["updated"] >= 1
+    got = client.get(f"/api/projects/{pid}/devices/{device['id']}", headers=auth).json()
+    assert got["vendor"] == "Cisco"
+    assert got["model"] == "C9300"
+    assert got["notes"] == "keep me"
+    assert got["function"] == "access"
+    assert got["fan_orientation"] == "front-to-back"
+    assert got["indicator_type"] == "led"
+    assert got["indicator_color"] == "green"
+    assert got["hostname"] == "core-keep-host"
+    assert got["rack_id"] == rack["id"]
+
