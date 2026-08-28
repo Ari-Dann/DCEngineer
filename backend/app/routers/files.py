@@ -18,6 +18,7 @@ from app.models import (
     User,
     WorkOrder,
 )
+from app.office_export import build_office_zip
 from app.rbi_export import build_rbi_workbook, eol_status, rack_svg
 from app.schemas import AttachmentOut, CatalogLearnIn
 from app.storage import get_storage, new_key
@@ -107,6 +108,21 @@ def export_rbi(project_id: int, db: Session = Depends(get_db), _: User = Depends
     return Response(
         content=data,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@meta_router.get("/projects/{project_id}/export-visio.zip")
+def export_visio_office(project_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    data = build_office_zip(db, project)
+    stem = (project.site_name or project.customer or project.name or "DCEngineer").replace(" ", "_")
+    filename = f"{stem}-Visio-Office.zip"
+    return Response(
+        content=data,
+        media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 

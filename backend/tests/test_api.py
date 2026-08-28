@@ -1500,5 +1500,111 @@ def test_import_explicit_rack_column_wins_over_parsed_location(client, auth):
     assert device["owner"] == "Acme Colo"
 
 
+def test_visio_office_export_preserves_hierarchy_and_pictures(client, auth):
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    from openpyxl import load_workbook
+
+    project = client.post(
+        "/api/projects",
+        headers=auth,
+        json={"name": "Azure DC", "customer": "Acme", "site_name": "Hall 3"},
+    ).json()
+    pid = project["id"]
+    area = client.post(f"/api/projects/{pid}/areas", headers=auth, json={"name": "Hall A"}).json()
+    row = client.post(f"/api/projects/{pid}/rows", headers=auth, json={"name": "A12", "area_id": area["id"]}).json()
+    rack = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "09", "area_id": area["id"], "row_id": row["id"], "ru_height": 42},
+    ).json()
+    device = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={
+            "name": "edge-fw",
+            "rack_id": rack["id"],
+            "vendor": "Fortinet",
+            "serial": "SN-VISIO",
+            "owner": "Acme Colo",
+            "ru_start": 19,
+            "ru_end": 19,
+            "device_type": "firewall",
+        },
+    ).json()
+    unlocated = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={"name": "spare-sw", "serial": "SN-LOOSE", "device_type": "switch"},
+    ).json()
+    jpeg = BytesIO(b"\xff\xd8visio-photo")
+    up = client.post(
+        "/api/attachments",
+        headers=auth,
+        data={"entity_type": "device", "entity_id": str(device["id"])},
+        files={"file": ("faceplate.jpg", jpeg, "image/jpeg")},
+    )
+    assert up.status_code == 201, up.text
+    restricted = client.post(
+        "/api/attachments",
+        headers=auth,
+        data={"entity_type": "device", "entity_id": str(device["id"]), "photography_restricted": "true"},
+        files={"file": ("secret.jpg", BytesIO(b"\xff\xd8secret"), "image/jpeg")},
+    )
+    assert restricted.status_code == 201, restricted.text
+    rack_photo = client.post(
+        "/api/attachments",
+        headers=auth,
+        data={"entity_type": "rack", "entity_id": str(rack["id"])},
+        files={"file": ("rack-front.jpg", BytesIO(b"\xff\xd8rack"), "image/jpeg")},
+    )
+    assert rack_photo.status_code == 201, rack_photo.text
+
+    exported = client.get(f"/api/projects/{pid}/export-visio.zip", headers=auth)
+    assert exported.status_code == 200, exported.text
+    assert exported.content[:2] == b"PK"
+    zf = ZipFile(BytesIO(exported.content))
+    names = zf.namelist()
+    assert "How to open in Visio.txt" in names
+    vsdx_name = next(n for n in names if n.endswith(".vsdx"))
+    xlsx_name = next(n for n in names if n.endswith(".xlsx") and "Data Visualizer" in n)
+    picture_names = [n for n in names if n.startswith("Pictures/") and n.endswith(".jpg")]
+    assert any("Hall A" in n and "A12" in n and "09" in n and "edge-fw" in n for n in picture_names)
+    assert any("rack-front.jpg" in n for n in picture_names)
+    assert not any("secret.jpg" in n for n in names)
+    assert any(n.startswith("Elevations/") and n.endswith("09.svg") for n in names)
+
+    vsdx = ZipFile(BytesIO(zf.read(vsdx_name)))
+    vsdx_names = vsdx.namelist()
+    assert "visio/document.xml" in vsdx_names
+    assert "visio/pages/pages.xml" in vsdx_names
+    pages_xml = vsdx.read("visio/pages/pages.xml").decode("utf-8")
+    assert "Overview" in pages_xml
+    assert "Hall A" in pages_xml
+    assert "09" in pages_xml
+    assert any(n.startswith("visio/media/") for n in vsdx_names)
+
+    wb = load_workbook(BytesIO(zf.read(xlsx_name)))
+    assert "VisioHierarchy" in wb.sheetnames
+    vis = wb["VisioHierarchy"]
+    rows = list(vis.iter_rows(min_row=2, values_only=True))
+    by_id = {r[0]: r for r in rows}
+    assert "SITE" in by_id
+    area_row = next(r for r in rows if r[2] == "Area")
+    row_row = next(r for r in rows if r[2] == "Row")
+    rack_row = next(r for r in rows if r[2] == "Rack")
+    device_row = next(r for r in rows if r[0].startswith("DEV-") and r[1] == "edge-fw")
+    assert area_row[3] == "SITE"
+    assert row_row[3] == area_row[0]
+    assert rack_row[3] == row_row[0]
+    assert device_row[3] == rack_row[0]
+    assert device_row[9] == "Acme Colo"
+    assert "faceplate.jpg" in (device_row[12] or "")
+    assert any(r[1] == "spare-sw" for r in rows)
+    assert unlocated["id"]
+
+
+
 
 

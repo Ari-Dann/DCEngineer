@@ -235,6 +235,7 @@ export const projects = {
   updateChecklist: (pid: number, cid: number, body: { title: string; template_key: string; items: { text: string; done: boolean }[] }) =>
     api<Checklist>(`/api/projects/${pid}/checklists/${cid}`, { method: "PATCH", body: JSON.stringify(body) }),
   exportUrl: (id: number) => `/api/projects/${id}/export.xlsx`,
+  exportVisioUrl: (id: number) => `/api/projects/${id}/export-visio.zip`,
 };
 
 export const ops = {
