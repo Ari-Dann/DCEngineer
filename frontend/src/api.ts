@@ -483,6 +483,7 @@ export type Device = {
   model: string;
   serial: string;
   asset_tag: string;
+  owner?: string;
   device_type: string;
   function: string;
   ru_start?: number | null;

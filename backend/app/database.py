@@ -81,3 +81,5 @@ def _ensure_columns() -> None:
                 conn.execute(text("ALTER TABLE devices ADD COLUMN pdu_a_id INTEGER"))
             if "pdu_b_id" not in dcols:
                 conn.execute(text("ALTER TABLE devices ADD COLUMN pdu_b_id INTEGER"))
+            if "owner" not in dcols:
+                conn.execute(text("ALTER TABLE devices ADD COLUMN owner VARCHAR(255) DEFAULT ''"))

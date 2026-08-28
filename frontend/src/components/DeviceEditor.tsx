@@ -21,6 +21,7 @@ export type DeviceDraft = {
   model: string;
   serial: string;
   asset_tag: string;
+  owner: string;
   device_type: string;
   function: string;
   rack_id: number | "";
@@ -53,6 +54,7 @@ export function emptyDraft(rackId?: number | ""): DeviceDraft {
     model: "",
     serial: "",
     asset_tag: "",
+    owner: "",
     device_type: "server",
     function: "",
     rack_id: rackId ?? "",
@@ -88,6 +90,7 @@ export function draftFromDevice(d: Device): DeviceDraft {
     model: d.model || "",
     serial: d.serial || "",
     asset_tag: d.asset_tag || "",
+    owner: d.owner || "",
     device_type: d.device_type || "server",
     function: d.function || "",
     rack_id: d.rack_id || "",
@@ -122,6 +125,7 @@ export function payloadFromDraft(draft: DeviceDraft) {
     model: draft.model,
     serial: draft.serial,
     asset_tag: draft.asset_tag,
+    owner: draft.owner,
     device_type: draft.device_type,
     function: draft.function,
     rack_id: rackId,
@@ -352,6 +356,7 @@ export function DeviceFields({
           model: "",
           serial: "",
           asset_tag: "",
+          owner: "",
           device_type: value.device_type,
           function: "",
           restricted: false,
@@ -458,7 +463,7 @@ export function DeviceFields({
           </button>
         </div>
       </label>
-      <div className="row">
+      <div className="row three">
         <label className="field">
           <span>Hostname</span>
           <input value={value.hostname} onChange={(e) => set({ hostname: e.target.value })} autoComplete="off" />
@@ -466,6 +471,21 @@ export function DeviceFields({
         <label className="field">
           <span>Asset tag</span>
           <input value={value.asset_tag} onChange={(e) => set({ asset_tag: e.target.value })} autoComplete="off" />
+        </label>
+        <label className="field">
+          <span>Owner</span>
+          <input
+            list="dce-owners"
+            value={value.owner}
+            onChange={(e) => set({ owner: e.target.value })}
+            placeholder="client / tenant sharing this rack"
+            autoComplete="off"
+          />
+          <datalist id="dce-owners">
+            {Array.from(new Set(devices.map((d) => (d.owner || "").trim()).filter(Boolean))).map((owner) => (
+              <option key={owner} value={owner} />
+            ))}
+          </datalist>
         </label>
       </div>
       <div className="row three">

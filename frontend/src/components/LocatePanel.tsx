@@ -87,7 +87,7 @@ export default function LocatePanel({
     <div className="card">
       <h3>Locate known devices</h3>
       <p className="muted">
-        Search logical identity (name, hostname, serial, vendor, model, IP, area, row, rack) and pin it to a physical
+        Search logical identity (name, hostname, serial, vendor, model, IP, owner, area, row, rack) and pin it to a physical
         rack + RU.
       </p>
       {error && <div className="error">{error}</div>}
@@ -98,7 +98,7 @@ export default function LocatePanel({
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="hostname, serial, vendor, row, area…"
+            placeholder="hostname, serial, vendor, owner, row, area…"
             autoComplete="off"
           />
         </label>
@@ -154,6 +154,7 @@ export default function LocatePanel({
             <strong>{d.name}</strong>
             <div className="muted">
               {d.hostname || "no hostname"} · {d.vendor} {d.model} · SN {d.serial || "—"}
+              {d.owner ? ` · ${d.owner}` : ""}
             </div>
           </div>
           <span className="muted">

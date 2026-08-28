@@ -212,7 +212,7 @@ export default function Project() {
       }
     }
     if (!filter) return true;
-    return [d.name, d.hostname, d.serial, d.vendor, d.model, d.management_ip, d.function]
+    return [d.name, d.hostname, d.serial, d.vendor, d.model, d.management_ip, d.function, d.owner]
       .join(" ")
       .toLowerCase()
       .includes(filter.toLowerCase());
@@ -711,7 +711,7 @@ export default function Project() {
               <input
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                placeholder="name, serial, hostname, vendor…"
+                placeholder="name, serial, hostname, vendor, owner…"
               />
             </label>
             {canImport && (
@@ -754,6 +754,7 @@ export default function Project() {
                 <tr>
                   <th></th>
                   <th>Name</th>
+                  <th>Owner</th>
                   <th>Area</th>
                   <th>Row</th>
                   <th>Rack</th>
@@ -784,6 +785,7 @@ export default function Project() {
                         {d.restricted ? " 🔒" : ""}
                         {d.undocumented ? " ⚠" : ""}
                       </td>
+                      <td>{d.owner || "—"}</td>
                       <td>{area?.name || "—"}</td>
                       <td>{row?.name || rack?.row_label || "—"}</td>
                       <td>{rack?.name || "—"}</td>

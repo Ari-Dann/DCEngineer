@@ -115,7 +115,7 @@ def build_rbi_workbook(db: Session, project: Project) -> bytes:
     elev = wb.create_sheet("Elevations")
     _header(
         elev,
-        ["Rack", "RU start", "RU end", "Device", "Vendor", "Model", "Type", "Serial", "Function"],
+        ["Rack", "RU start", "RU end", "Device", "Vendor", "Model", "Type", "Serial", "Owner", "Function"],
     )
     devices = db.query(Device).filter(Device.project_id == project.id).order_by(Device.rack_id, Device.ru_start).all()
     rack_by_id = {r.id: r for r in racks}
@@ -133,6 +133,7 @@ def build_rbi_workbook(db: Session, project: Project) -> bytes:
                 dev.model,
                 dev.device_type,
                 dev.serial,
+                getattr(dev, "owner", "") or "",
                 dev.function,
             ]
         )
@@ -151,6 +152,7 @@ def build_rbi_workbook(db: Session, project: Project) -> bytes:
             "Model",
             "Serial",
             "Asset",
+            "Owner",
             "Type",
             "Function",
             "RU start",
@@ -187,6 +189,7 @@ def build_rbi_workbook(db: Session, project: Project) -> bytes:
             dev.model,
             dev.serial,
             dev.asset_tag,
+            getattr(dev, "owner", "") or "",
             dev.device_type,
             dev.function,
             dev.ru_start,

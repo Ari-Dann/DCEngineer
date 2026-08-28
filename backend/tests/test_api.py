@@ -1375,4 +1375,130 @@ def test_device_ac_dc_power_and_dual_pdus(client, auth):
     assert bad.status_code == 400
 
 
+def test_device_owner_create_patch_search_and_export(client, auth):
+    project = client.post("/api/projects", headers=auth, json={"name": "Shared cage"}).json()
+    pid = project["id"]
+    created = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={"name": "cust-fw", "vendor": "Fortinet", "serial": "SN-OWN", "owner": "Acme Colo"},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["owner"] == "Acme Colo"
+    patched = client.patch(
+        f"/api/projects/{pid}/devices/{created.json()['id']}",
+        headers=auth,
+        json={"owner": "Beta Tenant"},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["owner"] == "Beta Tenant"
+    search = client.get(f"/api/projects/{pid}/search", headers=auth, params={"q": "Beta"})
+    assert search.status_code == 200
+    assert any(d["serial"] == "SN-OWN" for d in search.json()["devices"])
+    exported = client.get(f"/api/projects/{pid}/export.xlsx", headers=auth)
+    assert exported.status_code == 200
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    wb = load_workbook(BytesIO(exported.content), data_only=True)
+    devices_sheet = wb["Devices"]
+    headers = [cell.value for cell in next(devices_sheet.iter_rows(min_row=1, max_row=1))]
+    assert "Owner" in headers
+    owner_col = headers.index("Owner") + 1
+    owners = [devices_sheet.cell(row, owner_col).value for row in range(2, devices_sheet.max_row + 1)]
+    assert "Beta Tenant" in owners
+
+
+def test_import_parses_location_code_and_owner(client, auth):
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Devices"
+    ws.append(["Name", "Serial", "Location", "Owner", "Vendor"])
+    ws.append(["edge-fw", "SN-LOC-1", "A12 R09-RU19", "Acme Colo", "Fortinet"])
+    ws.append(["core-sw", "SN-LOC-2", "A12 R09-RU20-RU21", "Beta Tenant", "Cisco"])
+    buf = BytesIO()
+    wb.save(buf)
+    project = client.post("/api/projects", headers=auth, json={"name": "Location import"}).json()
+    pid = project["id"]
+
+    preview = client.post(
+        "/api/imports/preview",
+        headers=auth,
+        files={
+            "file": (
+                "gear.xlsx",
+                buf.getvalue(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert preview.status_code == 200, preview.text
+    sheet = preview.json()["sheets"][0]
+    assert "location" in sheet["mapped_fields"]
+    assert "owner" in sheet["mapped_fields"]
+    sample = sheet["sample_records"][0]
+    assert sample["row"] == "A12"
+    assert sample["rack"] == "09"
+    assert sample["ru_start"] == "19"
+    assert sample["owner"] == "Acme Colo"
+
+    imported = client.post(
+        f"/api/projects/{pid}/import",
+        headers=auth,
+        files={
+            "file": (
+                "gear.xlsx",
+                buf.getvalue(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["created"] >= 2
+    rows = {r["name"]: r for r in client.get(f"/api/projects/{pid}/rows", headers=auth).json()}
+    assert "A12" in rows
+    racks = client.get(f"/api/projects/{pid}/racks", headers=auth).json()
+    rack = next(r for r in racks if r["name"] == "09" and r["row_id"] == rows["A12"]["id"])
+    devices = {d["serial"]: d for d in client.get(f"/api/projects/{pid}/devices", headers=auth).json()}
+    first = devices["SN-LOC-1"]
+    assert first["rack_id"] == rack["id"]
+    assert first["ru_start"] == 19
+    assert first["owner"] == "Acme Colo"
+    second = devices["SN-LOC-2"]
+    assert second["rack_id"] == rack["id"]
+    assert second["ru_start"] == 20
+    assert second["ru_end"] == 21
+    assert second["owner"] == "Beta Tenant"
+
+
+def test_import_explicit_rack_column_wins_over_parsed_location(client, auth):
+    csv_body = (
+        "name,serial,location,rack,owner\n"
+        "leaf-sw,SN-OVR,A12 R09-RU19,CAB-1,Acme Colo\n"
+    )
+    project = client.post("/api/projects", headers=auth, json={"name": "Location override"}).json()
+    pid = project["id"]
+    imported = client.post(
+        f"/api/projects/{pid}/import",
+        headers=auth,
+        files={"file": ("override.csv", csv_body.encode(), "text/csv")},
+    )
+    assert imported.status_code == 200, imported.text
+    rows = {r["name"]: r for r in client.get(f"/api/projects/{pid}/rows", headers=auth).json()}
+    assert "A12" in rows
+    racks = {r["name"]: r for r in client.get(f"/api/projects/{pid}/racks", headers=auth).json()}
+    assert "CAB-1" in racks
+    assert "09" not in racks
+    device = next(d for d in client.get(f"/api/projects/{pid}/devices", headers=auth).json() if d["serial"] == "SN-OVR")
+    assert device["rack_id"] == racks["CAB-1"]["id"]
+    assert device["ru_start"] == 19
+    assert device["owner"] == "Acme Colo"
+
+
+
 
