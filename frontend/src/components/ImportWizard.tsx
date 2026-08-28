@@ -12,6 +12,32 @@ import { invalidateCatalog } from "../catalog";
 
 type HeaderMap = Record<number, string>;
 
+const LOCATION_RE =
+  /(?:row\s+)?([A-Za-z]{1,8}\d{1,4})\s*[/\-, ]+(?:r(?:ack)?\s*)?(\d{1,4})(?:\s*[/\-, ]+(?:r?u\s*)(\d{1,2})(?:\s*[-–]\s*(?:r?u\s*)?(\d{1,2}))?)?/i;
+const LOCATION_RACK_RU_RE = /r(?:ack)?\s*(\d{1,4})\s*[/\-, ]+(?:r?u\s*)(\d{1,2})(?:\s*[-–]\s*(?:r?u\s*)?(\d{1,2}))?/i;
+const DERIVED_LOCATION_FIELDS = ["row", "rack", "ru_start", "ru_end"] as const;
+
+function parseLocation(value: string): Record<string, string> {
+  const text = (value || "").trim();
+  if (!text) return {};
+  const full = text.match(LOCATION_RE);
+  if (full) {
+    const out: Record<string, string> = {};
+    if (full[1]) out.row = full[1];
+    if (full[2]) out.rack = full[2];
+    if (full[3]) out.ru_start = full[3];
+    if (full[4]) out.ru_end = full[4];
+    return out;
+  }
+  const rackRu = text.match(LOCATION_RACK_RU_RE);
+  if (!rackRu) return {};
+  const out: Record<string, string> = {};
+  if (rackRu[1]) out.rack = rackRu[1];
+  if (rackRu[2]) out.ru_start = rackRu[2];
+  if (rackRu[3]) out.ru_end = rackRu[3];
+  return out;
+}
+
 function invertMapping(headerMap: HeaderMap): Record<string, number> {
   const out: Record<string, number> = {};
   for (const [idx, field] of Object.entries(headerMap)) {
@@ -25,6 +51,12 @@ function sampleRecords(sheet: ImportPreviewSheet, headerMap: HeaderMap) {
     const rec: Record<string, string> = {};
     for (const [idx, field] of Object.entries(headerMap)) {
       if (field) rec[field] = row[Number(idx)] || "";
+    }
+    if (rec.location) {
+      const parsed = parseLocation(rec.location);
+      for (const key of DERIVED_LOCATION_FIELDS) {
+        if (parsed[key] && !rec[key]) rec[key] = parsed[key];
+      }
     }
     return rec;
   });
@@ -78,6 +110,18 @@ export default function ImportWizard({
   const fields: ImportField[] = preview?.fields || [];
   const samples = useMemo(() => (sheet ? sampleRecords(sheet, headerMap) : []), [sheet, headerMap]);
   const mappedCount = Object.values(headerMap).filter(Boolean).length;
+  const locationMapped = Object.values(headerMap).includes("location");
+  const previewFields = useMemo(() => {
+    const mapped = new Set(Object.values(headerMap).filter(Boolean));
+    const shown = fields.filter((f) => mapped.has(f.id));
+    if (!mapped.has("location")) return shown;
+    const extra = fields.filter(
+      (f) => DERIVED_LOCATION_FIELDS.includes(f.id as (typeof DERIVED_LOCATION_FIELDS)[number]) && !mapped.has(f.id),
+    );
+    const locAt = shown.findIndex((f) => f.id === "location");
+    if (locAt < 0) return [...shown, ...extra];
+    return [...shown.slice(0, locAt + 1), ...extra, ...shown.slice(locAt + 1)];
+  }, [fields, headerMap]);
 
   async function loadPreview(
     nextFile: File,
@@ -134,8 +178,16 @@ export default function ImportWizard({
       return;
     }
     const mapping = invertMapping(headerMap);
-    if (!mapping.name && !mapping.hostname && !mapping.serial && !mapping.area && !mapping.row && !mapping.rack) {
-      setError("Map a device field (name, hostname, or serial) or layout fields (area, row/aisle, rack).");
+    if (
+      !mapping.name &&
+      !mapping.hostname &&
+      !mapping.serial &&
+      !mapping.area &&
+      !mapping.row &&
+      !mapping.rack &&
+      !mapping.location
+    ) {
+      setError("Map a device field (name, hostname, or serial) or layout fields (area, row/aisle, rack, or location).");
       return;
     }
     setBusy(true);
@@ -168,9 +220,10 @@ export default function ImportWizard({
           </button>
         </div>
         <p className="muted">
-          Choose a project, then map spreadsheet columns (or rows) onto device and layout fields. Import follows Area →
-          Row → Rack → Device and will not move populated items into a different parent. Empty cells do not blank
-          fields that are already filled. CSV, XLSX, and ODS are supported.
+          Choose a project, then map spreadsheet columns (or rows) onto device and layout fields. A Location column such as{" "}
+          <code>A12 R09-RU19</code> can be mapped to “Location (parse row / rack / RU)” and is split into row A12, rack 09,
+          and RU 19. Import follows Area → Row → Rack → Device and will not move populated items into a different parent.
+          Empty cells do not blank fields that are already filled. CSV, XLSX, and ODS are supported.
         </p>
         {error && <div className="error">{error}</div>}
 
@@ -255,6 +308,9 @@ export default function ImportWizard({
             <p className="muted">
               {sheet.record_count} record{sheet.record_count === 1 ? "" : "s"} on “{sheet.name}”. Map each spreadsheet
               heading to a DCEngineer field, or leave as skip.
+              {locationMapped
+                ? " Location values like A12 R09-RU19 become row, rack, and RU start unless those columns are mapped separately."
+                : ""}
             </p>
             <div className="table-wrap">
               <table>
@@ -293,21 +349,17 @@ export default function ImportWizard({
                   <table>
                     <thead>
                       <tr>
-                        {fields
-                          .filter((f) => Object.values(headerMap).includes(f.id))
-                          .map((f) => (
-                            <th key={f.id}>{f.label}</th>
-                          ))}
+                        {previewFields.map((f) => (
+                          <th key={f.id}>{f.label}</th>
+                        ))}
                       </tr>
                     </thead>
                     <tbody>
                       {samples.map((rec, i) => (
                         <tr key={i}>
-                          {fields
-                            .filter((f) => Object.values(headerMap).includes(f.id))
-                            .map((f) => (
-                              <td key={f.id}>{rec[f.id] || "—"}</td>
-                            ))}
+                          {previewFields.map((f) => (
+                            <td key={f.id}>{rec[f.id] || "—"}</td>
+                          ))}
                         </tr>
                       ))}
                     </tbody>

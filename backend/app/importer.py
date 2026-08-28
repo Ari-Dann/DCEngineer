@@ -25,6 +25,15 @@ HEADER_MAP = {
     "model": ("model", "part", "pid", "sku", "part number", "part_number", "part no"),
     "serial": ("serial", "serial number", "serial_number", "sn", "s/n", "s/n."),
     "asset_tag": ("asset", "asset tag", "asset_tag", "tag", "asset no"),
+    "owner": ("owner", "client", "tenant", "owned by", "colo client", "colocation client"),
+    "location": (
+        "location",
+        "location code",
+        "rack location",
+        "physical location",
+        "placement",
+        "u location",
+    ),
     "rack": ("rack", "rack name", "rack_name", "cabinet", "cab"),
     "row": ("row", "aisle", "row name", "row_name", "aisle name"),
     "area": ("area", "hall", "cage", "room", "area name"),
@@ -61,6 +70,35 @@ GENERIC_SHEET_NAMES = {
 }
 KNOWN_TYPES = {t.lower() for t in DEVICE_TYPES}
 _BLANK_TEXT = {"", "unknown", "n/a", "na", "none", "-"}
+_LOCATION_LAYOUT_FIELDS = ("row", "rack", "ru_start", "ru_end")
+
+# "A12 R09-RU19" → row A12, rack 09, RU 19. Also accepts dashes, slashes, and "Row/Rack/RU" words.
+_LOCATION_RE = re.compile(
+    r"""
+    (?:row\s+)?
+    (?P<row>[A-Za-z]{1,8}\d{1,4})
+    \s*[/\-, ]+
+    (?:r(?:ack)?\s*)?
+    (?P<rack>\d{1,4})
+    (?:
+        \s*[/\-, ]+
+        (?:r?u\s*)
+        (?P<ru_start>\d{1,2})
+        (?:\s*[-–]\s*(?:r?u\s*)?(?P<ru_end>\d{1,2}))?
+    )?
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+_LOCATION_RACK_RU_RE = re.compile(
+    r"""
+    r(?:ack)?\s*(?P<rack>\d{1,4})
+    \s*[/\-, ]+
+    (?:r?u\s*)
+    (?P<ru_start>\d{1,2})
+    (?:\s*[-–]\s*(?:r?u\s*)?(?P<ru_end>\d{1,2}))?
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
 
 
 def _norm(value: Any) -> str:
@@ -247,7 +285,7 @@ def records_from_grid(
         for row in grid[header_index + 1 :]:
             rec = {field: (row[idx] if idx < len(row) else "") for field, idx in used.items()}
             if any(_norm(v) for v in rec.values()):
-                records.append(rec)
+                records.append(apply_location(rec))
         return records
     width = max((len(r) for r in grid), default=0)
     for col in range(header_index + 1, width):
@@ -256,7 +294,7 @@ def records_from_grid(
             row = grid[row_idx] if row_idx < len(grid) else []
             rec[field] = row[col] if col < len(row) else ""
         if any(_norm(v) for v in rec.values()):
-            records.append(rec)
+            records.append(apply_location(rec))
     return records
 
 
@@ -339,6 +377,42 @@ def preview_import(
         "suggested_sheet": suggested,
         "fields": IMPORT_FIELDS,
     }
+
+
+def parse_location(value: str) -> dict[str, str]:
+    """Parse a combined location such as 'A12 R09-RU19' into row, rack, and RU fields."""
+    text = _norm(value)
+    if not text:
+        return {}
+    match = _LOCATION_RE.search(text) or _LOCATION_RACK_RU_RE.search(text)
+    if not match:
+        return {}
+    groups = match.groupdict()
+    out: dict[str, str] = {}
+    row = (groups.get("row") or "").replace(" ", "")
+    if row:
+        out["row"] = row
+    rack = groups.get("rack") or ""
+    if rack:
+        out["rack"] = rack
+    ru_start = groups.get("ru_start") or ""
+    if ru_start:
+        out["ru_start"] = ru_start
+    ru_end = groups.get("ru_end") or ""
+    if ru_end:
+        out["ru_end"] = ru_end
+    return out
+
+
+def apply_location(record: dict[str, str]) -> dict[str, str]:
+    """Fill blank row/rack/RU fields from a mapped Location column; explicit columns win."""
+    parsed = parse_location(record.get("location") or "")
+    if not parsed:
+        return record
+    for key in _LOCATION_LAYOUT_FIELDS:
+        if parsed.get(key) and not (record.get(key) or "").strip():
+            record[key] = parsed[key]
+    return record
 
 
 def _int(value: str) -> int | None:
@@ -593,6 +667,7 @@ def _device_payload(row: dict[str, str], name: str, rack: Rack | None) -> dict[s
         "vendor": (row.get("vendor") or "")[:128],
         "model": (row.get("model") or "")[:128],
         "asset_tag": (row.get("asset_tag") or "")[:128],
+        "owner": (row.get("owner") or "")[:255],
         "function": (row.get("function") or "")[:255],
         "management_ip": (row.get("management_ip") or "")[:64],
         "notes": row.get("notes") or "",
@@ -697,7 +772,17 @@ def import_devices(
 
         # Pass 1: Area → Row → Rack so later device rows never re-parent populated layout.
         for row in records:
-            if not any((row.get("area"), row.get("row"), row.get("rack"), row.get("name"), row.get("hostname"), row.get("serial"))):
+            if not any(
+                (
+                    row.get("area"),
+                    row.get("row"),
+                    row.get("rack"),
+                    row.get("location"),
+                    row.get("name"),
+                    row.get("hostname"),
+                    row.get("serial"),
+                )
+            ):
                 continue
             _hierarchy_for_record(index, row, sheet_name)
 
@@ -707,7 +792,8 @@ def import_devices(
             area_name = (row.get("area") or "").strip()
             row_name = (row.get("row") or "").strip()
             rack_name = (row.get("rack") or "").strip()
-            if not name and not area_name and not row_name and not rack_name:
+            location = (row.get("location") or "").strip()
+            if not name and not area_name and not row_name and not rack_name and not location:
                 skipped += 1
                 continue
             _area, _aisle, rack = _hierarchy_for_record(index, row, sheet_name)
@@ -753,6 +839,7 @@ def import_devices(
                         vendor="",
                         model="",
                         asset_tag="",
+                        owner="",
                         device_type="server",
                         function="",
                         management_ip="",

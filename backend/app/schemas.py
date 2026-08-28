@@ -159,6 +159,7 @@ class DeviceIn(BaseModel):
     model: str = ""
     serial: str = ""
     asset_tag: str = ""
+    owner: str = ""
     device_type: str = "server"
     function: str = ""
     ru_start: Optional[int] = Field(default=None, ge=1, le=70)
@@ -197,6 +198,7 @@ class DevicePatch(BaseModel):
     model: Optional[str] = None
     serial: Optional[str] = None
     asset_tag: Optional[str] = None
+    owner: Optional[str] = None
     device_type: Optional[str] = None
     function: Optional[str] = None
     ru_start: Optional[int] = Field(default=None, ge=1, le=70)

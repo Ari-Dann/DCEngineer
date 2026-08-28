@@ -642,6 +642,8 @@ IMPORT_FIELDS = [
     {"id": "model", "label": "Model"},
     {"id": "serial", "label": "Serial"},
     {"id": "asset_tag", "label": "Asset tag"},
+    {"id": "owner", "label": "Owner / client"},
+    {"id": "location", "label": "Location (parse row / rack / RU)"},
     {"id": "rack", "label": "Rack"},
     {"id": "row", "label": "Row / aisle"},
     {"id": "area", "label": "Area / hall"},
