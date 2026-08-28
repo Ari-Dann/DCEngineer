@@ -275,6 +275,12 @@ export default function Project() {
           <button className="btn primary" onClick={() => downloadAuth(projects.exportUrl(pid), `RBI-${project.name}.xlsx`)}>
             Export RBI workbook
           </button>
+          <button
+            className="btn"
+            onClick={() => downloadAuth(projects.exportVisioUrl(pid), `${project.name}-Visio-Office.zip`)}
+          >
+            Export for Visio / Office
+          </button>
         </div>
       </div>
       {error && <div className="error">{error}</div>}
