@@ -1,4 +1,4 @@
-export type Role = "admin" | "engineer" | "remote" | "viewer";
+export type Role = "admin" | "engineer" | "remote" | "viewer" | "sidecar";
 
 export type Session = {
   access_token: string;
@@ -397,6 +397,159 @@ export async function fetchAttachmentBlob(id: number) {
   const res = await authFetch(`/api/attachments/${id}/download`);
   if (!res.ok) throw new Error("Download failed");
   return URL.createObjectURL(await res.blob());
+}
+
+export type VisionShotKind = "aisle_wide" | "rack_face" | "device_close" | "mixed";
+export type VisionClipKind = "aisle_wide" | "rack_face" | "device_close" | "serial_frame" | "other";
+export type VisionSessionStatus = "open" | "queued" | "running" | "needs_review" | "done" | "refused" | "error";
+
+export type VisionClip = {
+  id: number;
+  session_id: number;
+  attachment_id: number;
+  kind: VisionClipKind | string;
+  source: string;
+  source_attachment_id?: number | null;
+  timestamp_ms?: number | null;
+  notes: string;
+  created_at: string;
+  filename: string;
+  content_type: string;
+  size: number;
+  photography_restricted: boolean;
+};
+
+export type VisionProposal = {
+  id: number;
+  session_id: number;
+  status: "pending" | "accepted" | "rejected" | "edited" | string;
+  name: string;
+  hostname: string;
+  vendor: string;
+  model: string;
+  serial: string;
+  asset_tag: string;
+  owner: string;
+  device_type: string;
+  function: string;
+  ru_start?: number | null;
+  ru_end?: number | null;
+  area_name: string;
+  row_name: string;
+  rack_name: string;
+  rack_id?: number | null;
+  notes: string;
+  unreadable_fields: string[];
+  evidence_attachment_ids: number[];
+  prompt_text: string;
+  extractor_model: string;
+  raw_extraction?: unknown;
+  accepted_device_id?: number | null;
+  reviewed_by?: number | null;
+  reviewed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type VisionSession = {
+  id: number;
+  project_id: number;
+  area_id?: number | null;
+  row_id?: number | null;
+  rack_id?: number | null;
+  status: VisionSessionStatus | string;
+  shot_kind: VisionShotKind | string;
+  notes: string;
+  restricted_blocked: boolean;
+  error_detail: string;
+  layout?: unknown;
+  restriction_reasons: string[];
+  created_by?: number | null;
+  claimed_by?: number | null;
+  claimed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  clip_count: number;
+  proposal_count: number;
+  pending_count: number;
+  clips: VisionClip[];
+  proposals: VisionProposal[];
+};
+
+export type VisionProposalPatch = Partial<
+  Pick<
+    VisionProposal,
+    | "name"
+    | "hostname"
+    | "vendor"
+    | "model"
+    | "serial"
+    | "asset_tag"
+    | "owner"
+    | "device_type"
+    | "function"
+    | "ru_start"
+    | "ru_end"
+    | "area_name"
+    | "row_name"
+    | "rack_name"
+    | "rack_id"
+    | "notes"
+  >
+>;
+
+export const vision = {
+  sessions: (projectId?: number, status?: string) => {
+    const params = new URLSearchParams();
+    if (projectId) params.set("project_id", String(projectId));
+    if (status) params.set("status", status);
+    const q = params.toString();
+    return api<VisionSession[]>(`/api/vision/sessions${q ? `?${q}` : ""}`);
+  },
+  get: (id: number) => api<VisionSession>(`/api/vision/sessions/${id}`),
+  create: (body: {
+    project_id: number;
+    area_id?: number | null;
+    row_id?: number | null;
+    rack_id?: number | null;
+    shot_kind?: VisionShotKind;
+    notes?: string;
+  }) => api<VisionSession>("/api/vision/sessions", { method: "POST", body: JSON.stringify(body) }),
+  analyze: (id: number) => api<VisionSession>(`/api/vision/sessions/${id}/analyze`, { method: "POST" }),
+  remove: (id: number) => api<{ ok: boolean }>(`/api/vision/sessions/${id}`, { method: "DELETE" }),
+  patchProposal: (sessionId: number, proposalId: number, body: VisionProposalPatch) =>
+    api<VisionProposal>(`/api/vision/sessions/${sessionId}/proposals/${proposalId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  accept: (sessionId: number, proposalId: number) =>
+    api<Device>(`/api/vision/sessions/${sessionId}/proposals/${proposalId}/accept`, { method: "POST" }),
+  reject: (sessionId: number, proposalId: number) =>
+    api<VisionProposal>(`/api/vision/sessions/${sessionId}/proposals/${proposalId}/reject`, { method: "POST" }),
+};
+
+export async function uploadVisionClip(
+  sessionId: number,
+  file: File,
+  kind: VisionClipKind,
+  source: "upload" | "video_frame" = "upload",
+) {
+  const fd = new FormData();
+  fd.append("kind", kind);
+  fd.append("source", source);
+  fd.append("file", file);
+  const res = await authFetch(`/api/vision/sessions/${sessionId}/clips`, { method: "POST", body: fd });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body.detail || JSON.stringify(body);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<VisionClip>;
 }
 
 export type Project = {

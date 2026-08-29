@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { AisleRow, Area, Device, PDU, Project, Rack, enqueue, layoutPath, projects, uploadPhotos } from "../api";
 import { DeviceEditorModal, DeviceFields, emptyDraft, payloadFromDraft } from "../components/DeviceEditor";
 import LocatePanel from "../components/LocatePanel";
+import VisionAssist from "../components/VisionAssist";
 import type { DeviceDraft } from "../components/DeviceEditor";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { learnCatalog } from "../catalog";
@@ -213,6 +214,18 @@ export default function Capture() {
           {busy ? "Saving…" : "Save & next"}
         </button>
       </form>
+
+      {pid && (
+        <VisionAssist
+          projectId={Number(pid)}
+          areaId={areaId}
+          rowId={rowId}
+          rackId={rid}
+          areas={areas}
+          rows={aisleRows}
+          racks={racks}
+        />
+      )}
 
       {pid && (
         <div style={{ marginTop: 16 }}>

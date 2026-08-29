@@ -408,3 +408,85 @@ class CatalogEntry(Base):
     value: Mapped[str] = mapped_column(String(255))
     parent: Mapped[str] = mapped_column(String(128), default="")  # vendor name when kind=model
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class VisionSession(Base):
+    """On-floor photo/video capture queued for sidecar extraction. Staging only."""
+
+    __tablename__ = "vision_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    area_id: Mapped[Optional[int]] = mapped_column(ForeignKey("areas.id", ondelete="SET NULL"), nullable=True, index=True)
+    row_id: Mapped[Optional[int]] = mapped_column(ForeignKey("aisle_rows.id", ondelete="SET NULL"), nullable=True, index=True)
+    rack_id: Mapped[Optional[int]] = mapped_column(ForeignKey("racks.id", ondelete="SET NULL"), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="open", index=True)
+    shot_kind: Mapped[str] = mapped_column(String(32), default="mixed")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    restricted_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    error_detail: Mapped[str] = mapped_column(Text, default="")
+    layout_json: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    claimed_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    claimed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    clips: Mapped[list["VisionClip"]] = relationship(back_populates="session", cascade="all, delete-orphan")
+    proposals: Mapped[list["VisionProposal"]] = relationship(back_populates="session", cascade="all, delete-orphan")
+
+
+class VisionClip(Base):
+    """A still, video, or extracted frame kept as evidence on the session."""
+
+    __tablename__ = "vision_clips"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("vision_sessions.id", ondelete="CASCADE"), index=True)
+    attachment_id: Mapped[int] = mapped_column(ForeignKey("attachments.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(32), default="other")
+    source: Mapped[str] = mapped_column(String(32), default="upload")
+    source_attachment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("attachments.id", ondelete="SET NULL"), nullable=True)
+    timestamp_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    notes: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    session: Mapped["VisionSession"] = relationship(back_populates="clips")
+
+
+class VisionProposal(Base):
+    """Sidecar-suggested device fields. Never a live inventory row until accepted."""
+
+    __tablename__ = "vision_proposals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("vision_sessions.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    name: Mapped[str] = mapped_column(String(255), default="")
+    hostname: Mapped[str] = mapped_column(String(255), default="")
+    vendor: Mapped[str] = mapped_column(String(128), default="")
+    model: Mapped[str] = mapped_column(String(128), default="")
+    serial: Mapped[str] = mapped_column(String(128), default="")
+    asset_tag: Mapped[str] = mapped_column(String(128), default="")
+    owner: Mapped[str] = mapped_column(String(255), default="")
+    device_type: Mapped[str] = mapped_column(String(64), default="")
+    function: Mapped[str] = mapped_column(String(255), default="")
+    ru_start: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ru_end: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    area_name: Mapped[str] = mapped_column(String(255), default="")
+    row_name: Mapped[str] = mapped_column(String(128), default="")
+    rack_name: Mapped[str] = mapped_column(String(128), default="")
+    rack_id: Mapped[Optional[int]] = mapped_column(ForeignKey("racks.id", ondelete="SET NULL"), nullable=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    unreadable_fields_json: Mapped[str] = mapped_column(Text, default="[]")
+    evidence_attachment_ids_json: Mapped[str] = mapped_column(Text, default="[]")
+    prompt_text: Mapped[str] = mapped_column(Text, default="")
+    extractor_model: Mapped[str] = mapped_column(String(128), default="")
+    raw_extraction: Mapped[str] = mapped_column(Text, default="")
+    accepted_device_id: Mapped[Optional[int]] = mapped_column(ForeignKey("devices.id", ondelete="SET NULL"), nullable=True)
+    reviewed_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    session: Mapped["VisionSession"] = relationship(back_populates="proposals")

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.models import RefreshToken, User
 
-ROLES = ("admin", "engineer", "remote", "viewer")
+ROLES = ("admin", "engineer", "remote", "viewer", "sidecar")
 
 
 def hash_password(password: str) -> str:

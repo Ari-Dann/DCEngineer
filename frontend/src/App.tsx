@@ -7,6 +7,7 @@ import Projects from "./pages/Projects";
 import Project from "./pages/Project";
 import Rack from "./pages/Rack";
 import Capture from "./pages/Capture";
+import VisionSession from "./pages/VisionSession";
 import Work from "./pages/Work";
 import Ops from "./pages/Ops";
 import Settings from "./pages/Settings";
@@ -93,6 +94,7 @@ export default function App() {
       <Route path="/projects/:id" element={<Private><Project /></Private>} />
       <Route path="/projects/:id/racks/:rackId" element={<Private><Rack /></Private>} />
       <Route path="/capture" element={<Private><Capture /></Private>} />
+      <Route path="/capture/vision/:id" element={<Private><VisionSession /></Private>} />
       <Route path="/work" element={<Private><Work /></Private>} />
       <Route path="/ops" element={<Private><Ops /></Private>} />
       <Route path="/settings" element={<Private><Settings /></Private>} />

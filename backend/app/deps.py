@@ -42,3 +42,5 @@ def require_roles(*roles: str):
 AdminUser = require_roles("admin")
 WriteUser = require_roles("admin", "engineer", "remote")
 ImportUser = require_roles("admin", "engineer")
+SidecarUser = require_roles("sidecar")
+VisionWorker = require_roles("admin", "engineer", "remote", "sidecar")

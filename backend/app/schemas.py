@@ -457,3 +457,182 @@ class CatalogLearnIn(BaseModel):
     model: Optional[str] = None
     device_type: Optional[str] = None
     function: Optional[str] = None
+
+
+SHOT_KINDS = ("aisle_wide", "rack_face", "device_close", "mixed")
+CLIP_KINDS = ("aisle_wide", "rack_face", "device_close", "serial_frame", "other")
+CLIP_SOURCES = ("upload", "video_frame")
+VISION_SESSION_STATUSES = ("open", "queued", "running", "needs_review", "done", "refused", "error")
+VISION_PROPOSAL_STATUSES = ("pending", "accepted", "rejected", "edited")
+
+
+class VisionSessionIn(BaseModel):
+    project_id: int
+    area_id: Optional[int] = None
+    row_id: Optional[int] = None
+    rack_id: Optional[int] = None
+    shot_kind: str = "mixed"
+    notes: str = ""
+
+    @field_validator("shot_kind")
+    @classmethod
+    def _shot_kind(cls, value: str) -> str:
+        kind = (value or "mixed").strip() or "mixed"
+        if kind not in SHOT_KINDS:
+            raise ValueError(f"shot_kind must be one of {SHOT_KINDS}")
+        return kind
+
+
+class VisionClipOut(ORMModel):
+    id: int
+    session_id: int
+    attachment_id: int
+    kind: str
+    source: str
+    source_attachment_id: Optional[int]
+    timestamp_ms: Optional[int]
+    notes: str
+    created_at: datetime
+    filename: str = ""
+    content_type: str = ""
+    size: int = 0
+    photography_restricted: bool = False
+
+
+class VisionProposalIn(BaseModel):
+    name: str = ""
+    hostname: str = ""
+    vendor: str = ""
+    model: str = ""
+    serial: str = ""
+    asset_tag: str = ""
+    owner: str = ""
+    device_type: str = ""
+    function: str = ""
+    ru_start: Optional[int] = Field(default=None, ge=1, le=70)
+    ru_end: Optional[int] = Field(default=None, ge=1, le=70)
+    area_name: str = ""
+    row_name: str = ""
+    rack_name: str = ""
+    rack_id: Optional[int] = None
+    notes: str = ""
+    unreadable_fields: list[str] = []
+    evidence_attachment_ids: list[int] = []
+    prompt_text: str = ""
+    extractor_model: str = ""
+    raw_extraction: Any = None
+
+
+class VisionProposalPatch(BaseModel):
+    name: Optional[str] = None
+    hostname: Optional[str] = None
+    vendor: Optional[str] = None
+    model: Optional[str] = None
+    serial: Optional[str] = None
+    asset_tag: Optional[str] = None
+    owner: Optional[str] = None
+    device_type: Optional[str] = None
+    function: Optional[str] = None
+    ru_start: Optional[int] = Field(default=None, ge=1, le=70)
+    ru_end: Optional[int] = Field(default=None, ge=1, le=70)
+    area_name: Optional[str] = None
+    row_name: Optional[str] = None
+    rack_name: Optional[str] = None
+    rack_id: Optional[int] = None
+    notes: Optional[str] = None
+    unreadable_fields: Optional[list[str]] = None
+    evidence_attachment_ids: Optional[list[int]] = None
+
+
+class VisionProposalOut(ORMModel):
+    id: int
+    session_id: int
+    status: str
+    name: str
+    hostname: str
+    vendor: str
+    model: str
+    serial: str
+    asset_tag: str
+    owner: str
+    device_type: str
+    function: str
+    ru_start: Optional[int]
+    ru_end: Optional[int]
+    area_name: str
+    row_name: str
+    rack_name: str
+    rack_id: Optional[int]
+    notes: str
+    unreadable_fields: list[str] = []
+    evidence_attachment_ids: list[int] = []
+    prompt_text: str
+    extractor_model: str
+    raw_extraction: Any = None
+    accepted_device_id: Optional[int]
+    reviewed_by: Optional[int]
+    reviewed_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
+
+
+class VisionProposalBatchIn(BaseModel):
+    model: str = ""
+    extractor_model: str = ""
+    prompt_text: str = ""
+    raw_extraction: Any = None
+    layout: Any = None
+    media_sent_attachment_ids: list[int] = []
+    proposals: list[VisionProposalIn] = []
+
+
+class VisionSessionStatusIn(BaseModel):
+    status: str
+    error_detail: str = ""
+    restricted_blocked: Optional[bool] = None
+    layout: Any = None
+
+    @field_validator("status")
+    @classmethod
+    def _status(cls, value: str) -> str:
+        if value not in ("running", "needs_review", "error", "refused", "queued"):
+            raise ValueError("status must be running, needs_review, error, refused, or queued")
+        return value
+
+
+class VisionSessionOut(ORMModel):
+    id: int
+    project_id: int
+    area_id: Optional[int]
+    row_id: Optional[int]
+    rack_id: Optional[int]
+    status: str
+    shot_kind: str
+    notes: str
+    restricted_blocked: bool
+    error_detail: str
+    layout: Any = None
+    restriction_reasons: list[str] = []
+    created_by: Optional[int]
+    claimed_by: Optional[int]
+    claimed_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
+    clip_count: int = 0
+    proposal_count: int = 0
+    pending_count: int = 0
+    clips: list[VisionClipOut] = []
+    proposals: list[VisionProposalOut] = []
+
+
+class VisionJobOut(ORMModel):
+    id: int
+    project_id: int
+    status: str
+    shot_kind: str
+    restricted_blocked: bool
+    area_id: Optional[int]
+    row_id: Optional[int]
+    rack_id: Optional[int]
+    clip_count: int = 0
+    created_at: datetime
