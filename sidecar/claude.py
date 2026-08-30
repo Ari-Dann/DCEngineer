@@ -1,37 +1,16 @@
 from __future__ import annotations
 
-import base64
 import logging
 from typing import Any
 
 import httpx
 
+from images import b64, media_type_for
 from schema import EXTRACTION_SCHEMA, SYSTEM_PROMPT, extraction_prompt
 
 log = logging.getLogger("dce-sidecar")
 
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
-IMAGE_TYPES = {
-    "image/jpeg": "image/jpeg",
-    "image/jpg": "image/jpeg",
-    "image/png": "image/png",
-    "image/gif": "image/gif",
-    "image/webp": "image/webp",
-}
-
-
-def media_type_for(content_type: str, filename: str) -> str | None:
-    ctype = (content_type or "").split(";")[0].strip().lower()
-    if ctype in IMAGE_TYPES:
-        return IMAGE_TYPES[ctype]
-    suffix = (filename or "").rsplit(".", 1)[-1].lower()
-    return {
-        "jpg": "image/jpeg",
-        "jpeg": "image/jpeg",
-        "png": "image/png",
-        "gif": "image/gif",
-        "webp": "image/webp",
-    }.get(suffix)
 
 
 def image_block(data: bytes, media_type: str) -> dict:
@@ -40,7 +19,7 @@ def image_block(data: bytes, media_type: str) -> dict:
         "source": {
             "type": "base64",
             "media_type": media_type,
-            "data": base64.b64encode(data).decode("ascii"),
+            "data": b64(data),
         },
     }
 
@@ -52,12 +31,9 @@ def parse_tool_payload(body: dict) -> dict:
         if block.get("type") == "text" and isinstance(block.get("text"), str):
             text = block["text"].strip()
             if text.startswith("{"):
-                import json
+                from jsonutil import parse_json_object
 
-                try:
-                    return json.loads(text)
-                except json.JSONDecodeError:
-                    continue
+                return parse_json_object(text)
     raise RuntimeError("Claude response did not include a JSON extraction")
 
 
@@ -68,6 +44,7 @@ def extract(
     shot_kind: str,
     notes: str = "",
     timeout: float = 120.0,
+    base_url: str = "",
 ) -> tuple[dict, str, str]:
     """Call Claude with a JSON schema. Returns (extraction, prompt, model)."""
     content: list[dict[str, Any]] = []
@@ -92,7 +69,7 @@ def extract(
         "messages": [{"role": "user", "content": content}],
     }
     res = httpx.post(
-        ANTHROPIC_URL,
+        ANTHROPIC_URL if not base_url else f"{base_url.rstrip('/')}/v1/messages",
         headers={
             "x-api-key": api_key,
             "anthropic-version": "2023-06-01",
@@ -106,3 +83,6 @@ def extract(
         res.raise_for_status()
     extraction = parse_tool_payload(res.json())
     return extraction, prompt, model
+
+
+__all__ = ["extract", "parse_tool_payload", "media_type_for", "ANTHROPIC_URL"]

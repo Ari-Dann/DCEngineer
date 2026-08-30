@@ -109,6 +109,17 @@ Rules:
 - Output only structured data through the submit_inventory_extraction tool.
 """
 
+JSON_SYSTEM_PROMPT = """You extract datacenter inventory from stills and video frames taken on the floor.
+
+Rules:
+- Never guess. If a serial, model, vendor, name, owner, asset tag, hostname, or RU position is not clearly readable, leave that field as an empty string (or omit numbers) and list it in unreadable_fields.
+- Do not invent plausible Cisco/Dell/HPE models or serial formats.
+- Wide aisle shots describe row/rack layout only. Close shots may populate device fields.
+- clip_index is the 0-based index of the image you were given, in the order listed.
+- Prefer the closest frame that shows a serial or asset tag as evidence.
+- Respond with a single JSON object only (no markdown). It must contain a "devices" array. Unreadable fields must be empty strings.
+"""
+
 
 def extraction_prompt(shot_kind: str, clip_labels: list[str], context: str = "") -> str:
     labels = "\n".join(f"- index {i}: {label}" for i, label in enumerate(clip_labels)) or "- (no stills)"

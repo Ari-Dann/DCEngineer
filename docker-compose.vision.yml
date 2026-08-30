@@ -1,10 +1,13 @@
 # Optional vision sidecar. Talks only to the DCEngineer JWT API — never writes
-# final devices. Anthropic key stays in this container.
+# final devices. Model API keys stay in this container.
 #
 # Lab:
 #   docker compose -f docker-compose.dev.yml -f docker-compose.vision.yml up -d --build
 # Production (Caddy stack):
 #   docker compose -f docker-compose.yml -f docker-compose.vision.yml up -d --build
+#
+# Providers: claude | gemini | huggingface | openai | ollama
+# Hugging Face short names: qwen-vl, qwen2-vl, llama-3.2-vision (gated).
 
 services:
   sidecar:
@@ -21,10 +24,21 @@ services:
       DCE_API_URL: ${DCE_API_URL:-http://dcengineer:8080}
       DCE_SIDECAR_USER: ${DCE_SIDECAR_USER:-sidecar}
       DCE_SIDECAR_PASSWORD: ${DCE_SIDECAR_PASSWORD:-}
+      VISION_PROVIDER: ${VISION_PROVIDER:-}
+      VISION_MODEL: ${VISION_MODEL:-qwen-vl}
+      VISION_API_KEY: ${VISION_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      VISION_MODEL: ${VISION_MODEL:-claude-sonnet-4-20250514}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      HF_TOKEN: ${HF_TOKEN:-}
+      HUGGINGFACE_API_KEY: ${HUGGINGFACE_API_KEY:-}
+      HF_PROVIDER: ${HF_PROVIDER:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      VISION_BASE_URL: ${VISION_BASE_URL:-}
+      OLLAMA_HOST: ${OLLAMA_HOST:-}
       VISION_POLL_SECONDS: ${VISION_POLL_SECONDS:-8}
       VISION_MAX_FRAMES: ${VISION_MAX_FRAMES:-24}
+      VISION_TIMEOUT: ${VISION_TIMEOUT:-120}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       dcengineer:

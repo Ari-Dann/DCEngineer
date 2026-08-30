@@ -6,7 +6,8 @@ import time
 from typing import Any
 
 from client import DCEClient
-from claude import extract, media_type_for
+from images import media_type_for
+from providers import load_backend
 from frames import extract_frames, is_video
 from schema import SYSTEM_PROMPT, blank_unreadable
 
@@ -107,7 +108,7 @@ def proposals_from_extraction(
     }
 
 
-def process_session(client: DCEClient, session_id: int, api_key: str, model: str, max_frames: int) -> None:
+def process_session(client: DCEClient, session_id: int, backend, max_frames: int) -> None:
     try:
         claimed = client.claim(session_id)
     except Exception as exc:
@@ -175,15 +176,13 @@ def process_session(client: DCEClient, session_id: int, api_key: str, model: str
     images = [(s["bytes"], s["media_type"], s["label"]) for s in stills]
     sent_ids = [int(s["attachment_id"]) for s in stills]
     try:
-        extraction, prompt, used_model = extract(
-            api_key,
-            model,
+        extraction, prompt, used_model = backend.extract(
             images,
             session.get("shot_kind") or "mixed",
             session.get("notes") or "",
         )
     except Exception as exc:
-        log.exception("Claude failed for session %s", session_id)
+        log.exception("%s failed for session %s", backend.provider, session_id)
         client.set_status(session_id, "error", error_detail=str(exc)[:1000])
         return
 
@@ -213,24 +212,23 @@ def loop() -> None:
     api_url = env("DCE_API_URL", "http://dcengineer:8080")
     username = env("DCE_SIDECAR_USER") or env("BOOTSTRAP_SIDECAR_USER")
     password = env("DCE_SIDECAR_PASSWORD") or env("BOOTSTRAP_SIDECAR_PASSWORD")
-    api_key = env("ANTHROPIC_API_KEY")
-    model = env("VISION_MODEL", "claude-sonnet-4-20250514")
     poll = float(env("VISION_POLL_SECONDS", "8") or "8")
     max_frames = int(env("VISION_MAX_FRAMES", "24") or "24")
     if not username or not password:
         raise SystemExit("DCE_SIDECAR_USER and DCE_SIDECAR_PASSWORD are required")
+    backend = load_backend()
     client = DCEClient(api_url, username, password)
     client.login()
-    log.info("Vision sidecar polling %s (model=%s)", api_url, model)
+    log.info("Vision sidecar polling %s (provider=%s model=%s)", api_url, backend.provider, backend.model)
     while True:
         try:
-            if not api_key:
-                log.warning("ANTHROPIC_API_KEY is not set; queued jobs will wait")
+            if not backend.ready:
+                log.warning("%s is not set; queued jobs will wait", backend.missing)
                 time.sleep(poll)
                 continue
             jobs = client.jobs()
             for job in jobs:
-                process_session(client, int(job["id"]), api_key, model, max_frames)
+                process_session(client, int(job["id"]), backend, max_frames)
         except Exception:
             log.exception("Sidecar loop error")
             try:
