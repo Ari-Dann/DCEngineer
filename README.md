@@ -250,16 +250,34 @@ Only an **Admin** can rename or delete an entire project.
 
 ### Vision sidecar (optional)
 
-On Capture, **Vision assist** records a wide aisle clip plus closer rack and serial shots. Media is stored on a vision session. Analyze queues a job for `sidecar/`, which authenticates with JWT, downloads attachments, extracts relevant video frames with ffmpeg, and calls Claude with a JSON schema. Unreadable fields are stored blank (never guessed). Proposed rows are staging only until an engineer accepts, edits, or rejects them. Accepting copies evidence photos onto the new device and keeps the originals on the session. Prompt, model, and raw extraction sit on each proposal for audit.
+On Capture, **Vision assist** records a wide aisle clip plus closer rack and serial shots. Media is stored on a vision session. Analyze queues a job for `sidecar/`, which authenticates with JWT, downloads attachments, extracts relevant video frames with ffmpeg, and calls a vision model with a JSON schema. Unreadable fields are stored blank (never guessed). Proposed rows are staging only until an engineer accepts, edits, or rejects them. Accepting copies evidence photos onto the new device and keeps the originals on the session. Prompt, model, and raw extraction sit on each proposal for audit.
 
 If an area is restricted, photography is forbidden, or a clip is marked photography-restricted, Analyze **refuses** and the sidecar never sends image bytes to the model.
 
+Set `BOOTSTRAP_SIDECAR_PASSWORD` / `DCE_SIDECAR_PASSWORD` and a provider key in `.env`. Keys stay in the sidecar container, not the main API.
+
+| `VISION_PROVIDER` | Key | Example `VISION_MODEL` |
+| --- | --- | --- |
+| `gemini` | `GEMINI_API_KEY` | `gemini-2.0-flash` (default) or `gemini-flash` |
+| `huggingface` | `HF_TOKEN` | `qwen-vl` → Qwen2.5-VL-7B, `qwen2-vl`, `llama-3.2-vision` (gated; Llama 3.1 has no vision weights and aliases to 3.2) |
+| `ollama` | none | `llama3.2-vision` or `qwen2.5vl` at `VISION_BASE_URL` (default `http://ollama:11434`) |
+| `openai` | `OPENAI_API_KEY` | `gpt-4o`, or any OpenAI-compatible server via `VISION_BASE_URL` |
+| `claude` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` |
+
 ```bash
-# set BOOTSTRAP_SIDECAR_PASSWORD, DCE_SIDECAR_PASSWORD, and ANTHROPIC_API_KEY in .env
+# Gemini
+VISION_PROVIDER=gemini GEMINI_API_KEY=... VISION_MODEL=gemini-2.0-flash
+
+# Hugging Face Inference Providers (good for Qwen-VL testing; Llama 3.2 Vision needs a HF license accept)
+VISION_PROVIDER=huggingface HF_TOKEN=hf_... VISION_MODEL=qwen-vl
+
+# Local Ollama (Llama 3.2 Vision / Qwen-VL)
+VISION_PROVIDER=ollama VISION_MODEL=llama3.2-vision VISION_BASE_URL=http://host.docker.internal:11434
+
 docker compose -f docker-compose.dev.yml -f docker-compose.vision.yml up -d --build
 ```
 
-The Anthropic key lives only in the sidecar container, not in the main API.
+If `VISION_PROVIDER` is empty, the sidecar uses the first configured key (Anthropic, Gemini, Hugging Face, OpenAI). Without a key, jobs stay `queued`.
 
 Android APK (no Google Play Services): see [`android/README.md`](android/README.md).
 
@@ -279,7 +297,7 @@ Project page → **Export RBI workbook**. Sheets: Cover, Revision Control, Racks
 # API tests
 cd backend && pip install -r requirements.txt && pytest -q
 
-# Sidecar unit tests (mocked; no Anthropic calls)
+# Sidecar unit tests (mocked; no live model calls)
 cd sidecar && pip install -r requirements.txt && pytest -q
 
 # UI (proxies /api to :8080)
