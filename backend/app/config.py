@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     bootstrap_admin_password: str = "admin"
     bootstrap_admin_email: str = "admin@localhost"
 
+    bootstrap_sidecar_user: str = ""
+    bootstrap_sidecar_password: str = ""
+    bootstrap_sidecar_email: str = "sidecar@localhost"
+
     database_url: str = "sqlite:////data/dcengineer.db"
 
     cors_origins: str = ""

@@ -17,7 +17,8 @@ from app.routers.auth import router as auth_router
 from app.routers.auth import users_router
 from app.routers.files import files_router, meta_router
 from app.routers.inventory import ops_router, projects_router
-from app.seed import bootstrap_admin, seed_templates
+from app.routers.vision import router as vision_router
+from app.seed import bootstrap_admin, bootstrap_sidecar, seed_templates
 
 log = logging.getLogger("dcengineer")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -36,6 +37,7 @@ async def lifespan(_app: FastAPI):
     try:
         seed_templates(db)
         bootstrap_admin(db)
+        bootstrap_sidecar(db)
     finally:
         db.close()
     task = asyncio.create_task(backup_loop())
@@ -71,6 +73,7 @@ app.include_router(projects_router)
 app.include_router(ops_router)
 app.include_router(files_router)
 app.include_router(meta_router)
+app.include_router(vision_router)
 
 static_dir = Path(settings.static_dir)
 if static_dir.exists():

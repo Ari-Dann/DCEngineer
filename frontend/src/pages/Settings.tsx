@@ -128,6 +128,7 @@ export default function Settings() {
                   <option>engineer</option>
                   <option>remote</option>
                   <option>viewer</option>
+                  <option>sidecar</option>
                 </select>
               </label>
               {editingId != null && (

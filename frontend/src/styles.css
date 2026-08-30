@@ -301,3 +301,15 @@ tr.clickable { cursor: pointer; }
 .lightbox { max-width: 96vw; max-height: 90vh; border-radius: 12px; }
 .choice.compact { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); }
 .choice.compact button { min-height: 40px; }
+.audit-block {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.78rem;
+  background: #0e141c;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  max-height: 240px;
+  overflow: auto;
+  color: var(--muted);
+}

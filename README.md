@@ -27,7 +27,8 @@ Caddy, Traefik, or Nginx  →  dcengineer:8080
         │
         ├─ SQLite (default) or Postgres via DATABASE_URL
         ├─ Attachments: local | nfs bind-mount | SFTP
-        └─ App backups: tar.gz into BACKUP_PATH
+        ├─ App backups: tar.gz into BACKUP_PATH
+        └─ optional vision sidecar → JWT API → Claude (staging proposals only)
 ```
 
 One container serves the API and the built SPA. Traefik routing uses a **dynamic YAML file** (no container labels) so compose UIs stay clean.
@@ -210,9 +211,9 @@ ENV used by those files: `DCE_IMAGE`, `DCE_HOSTNAME`, `TRAEFIK_NETWORK`, `TRAEFI
 - `POST /api/auth/login` → `{ access_token, refresh_token, role, username, user_id }`
 - Send `Authorization: Bearer <access_token>`
 - `POST /api/auth/refresh` with `{ refresh_token }`
-- Roles: `admin`, `engineer`, `remote`, `viewer`
+- Roles: `admin`, `engineer`, `remote`, `viewer`, `sidecar`
 
-Bootstrap admin is created **only when the user table is empty** (`BOOTSTRAP_ADMIN_*`). Additional users: Settings → (admin) or `POST /api/users`.
+Bootstrap admin is created **only when the user table is empty** (`BOOTSTRAP_ADMIN_*`). Additional users: Settings → (admin) or `POST /api/users`. Set `BOOTSTRAP_SIDECAR_USER` and `BOOTSTRAP_SIDECAR_PASSWORD` to create a `sidecar` worker account that can pull attachments and write **staging proposals only** — it cannot create devices.
 
 ---
 
@@ -247,6 +248,19 @@ Only an **Admin** can rename or delete an entire project.
 
 **Capture photo** uses `getUserMedia` and a canvas JPEG. Files are uploaded as attachments on the current entity (device, rack, area, project, inspection, incident, or work order). Multiple photos per device are supported. Restricted (government / EMSS) equipment blocks photography.
 
+### Vision sidecar (optional)
+
+On Capture, **Vision assist** records a wide aisle clip plus closer rack and serial shots. Media is stored on a vision session. Analyze queues a job for `sidecar/`, which authenticates with JWT, downloads attachments, extracts relevant video frames with ffmpeg, and calls Claude with a JSON schema. Unreadable fields are stored blank (never guessed). Proposed rows are staging only until an engineer accepts, edits, or rejects them. Accepting copies evidence photos onto the new device and keeps the originals on the session. Prompt, model, and raw extraction sit on each proposal for audit.
+
+If an area is restricted, photography is forbidden, or a clip is marked photography-restricted, Analyze **refuses** and the sidecar never sends image bytes to the model.
+
+```bash
+# set BOOTSTRAP_SIDECAR_PASSWORD, DCE_SIDECAR_PASSWORD, and ANTHROPIC_API_KEY in .env
+docker compose -f docker-compose.dev.yml -f docker-compose.vision.yml up -d --build
+```
+
+The Anthropic key lives only in the sidecar container, not in the main API.
+
 Android APK (no Google Play Services): see [`android/README.md`](android/README.md).
 
 API docs: `https://${DCE_HOSTNAME}/docs`.
@@ -265,6 +279,9 @@ Project page → **Export RBI workbook**. Sheets: Cover, Revision Control, Racks
 # API tests
 cd backend && pip install -r requirements.txt && pytest -q
 
+# Sidecar unit tests (mocked; no Anthropic calls)
+cd sidecar && pip install -r requirements.txt && pytest -q
+
 # UI (proxies /api to :8080)
 cd frontend && npm install && npm run build
 # npm run dev
@@ -279,6 +296,7 @@ CI runs pytest and `npm run build` on every push. The image workflow publishes `
 ```
 backend/app/          FastAPI + SQLAlchemy + JWTAuth
 frontend/             React + Vite PWA
+sidecar/              Optional vision worker (JWT API + Claude)
 deploy/traefik|nginx|caddy
 docker-compose*.yml
 .env.example

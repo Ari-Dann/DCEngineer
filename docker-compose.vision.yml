@@ -1,0 +1,38 @@
+# Optional vision sidecar. Talks only to the DCEngineer JWT API — never writes
+# final devices. Anthropic key stays in this container.
+#
+# Lab:
+#   docker compose -f docker-compose.dev.yml -f docker-compose.vision.yml up -d --build
+# Production (Caddy stack):
+#   docker compose -f docker-compose.yml -f docker-compose.vision.yml up -d --build
+
+services:
+  sidecar:
+    image: ${DCE_SIDECAR_IMAGE:-dcengineer-sidecar:local}
+    build:
+      context: ./sidecar
+      dockerfile: Dockerfile
+    container_name: dcengineer-sidecar
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-UTC}
+      DCE_API_URL: ${DCE_API_URL:-http://dcengineer:8080}
+      DCE_SIDECAR_USER: ${DCE_SIDECAR_USER:-sidecar}
+      DCE_SIDECAR_PASSWORD: ${DCE_SIDECAR_PASSWORD:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      VISION_MODEL: ${VISION_MODEL:-claude-sonnet-4-20250514}
+      VISION_POLL_SECONDS: ${VISION_POLL_SECONDS:-8}
+      VISION_MAX_FRAMES: ${VISION_MAX_FRAMES:-24}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      dcengineer:
+        condition: service_healthy
+    networks:
+      - default
+      - dce-internal
+
+networks:
+  dce-internal:
+    name: dce-internal

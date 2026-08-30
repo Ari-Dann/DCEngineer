@@ -150,3 +150,24 @@ def bootstrap_admin(db: Session) -> None:
         )
     )
     db.commit()
+
+
+def bootstrap_sidecar(db: Session) -> None:
+    settings = get_settings()
+    username = (settings.bootstrap_sidecar_user or "").strip()
+    password = settings.bootstrap_sidecar_password or ""
+    if not username or not password:
+        return
+    if db.query(User).filter(User.username == username).first():
+        return
+    db.add(
+        User(
+            username=username,
+            email=settings.bootstrap_sidecar_email or f"{username}@localhost",
+            full_name="Vision sidecar",
+            hashed_password=hash_password(password),
+            role="sidecar",
+            is_active=True,
+        )
+    )
+    db.commit()
