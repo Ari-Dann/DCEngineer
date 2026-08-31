@@ -21,7 +21,8 @@ from app.models import (
 from app.office_export import build_office_zip
 from app.rbi_export import build_rbi_workbook, eol_status, rack_svg
 from app.schemas import AttachmentOut, CatalogLearnIn
-from app.storage import get_storage, new_key
+from app.media_paths import hierarchy_key
+from app.storage import get_storage
 from app.backup import run_backup
 
 files_router = APIRouter(prefix="/api", tags=["files"])
@@ -33,6 +34,7 @@ async def upload_attachment(
     entity_type: str = Form(...),
     entity_id: int = Form(...),
     photography_restricted: bool = Form(False),
+    ru: int | None = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     user: User = Depends(WriteUser),
@@ -41,7 +43,7 @@ async def upload_attachment(
     data = await file.read()
     if len(data) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(413, f"File exceeds {settings.max_upload_mb} MB")
-    key = new_key(file.filename or "upload.bin")
+    key = hierarchy_key(db, entity_type, entity_id, file.filename or "upload.bin", ru=ru)
     get_storage().put(key, data)
     row = Attachment(
         entity_type=entity_type,

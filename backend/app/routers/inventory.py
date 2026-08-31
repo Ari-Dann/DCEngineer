@@ -214,6 +214,7 @@ def delete_project(project_id: int, db: Session = Depends(get_db), _: User = Dep
         "project": [project_id],
         "area": area_ids,
         "row": row_ids,
+        "aisle_row": row_ids,
         "rack": rack_ids,
         "device": device_ids,
     }
