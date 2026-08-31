@@ -1845,6 +1845,61 @@ def test_hierarchy_government_emss_tags_block_photos(client, auth):
     assert device["restricted_reason"] == "EMSS"
 
 
+def test_emss_tag_is_independent_per_row_and_rack(client, auth):
+    project = client.post("/api/projects", headers=auth, json={"name": "Area1 site"}).json()
+    pid = project["id"]
+    area = client.post(f"/api/projects/{pid}/areas", headers=auth, json={"name": "Area1"}).json()
+    rows = client.post(
+        f"/api/projects/{pid}/rows/bulk",
+        headers=auth,
+        json={"area_id": area["id"], "names": ["A01", "A04"]},
+    ).json()["created"]
+    by_name = {r["name"]: r for r in rows}
+
+    tagged = client.patch(
+        f"/api/projects/{pid}/rows/{by_name['A01']['id']}",
+        headers=auth,
+        json={"name": "A01", "restriction_type": "EMSS"},
+    ).json()
+    listed = {r["name"]: r for r in client.get(f"/api/projects/{pid}/rows", headers=auth).json()}
+    assert tagged["restriction_type"] == "EMSS"
+    assert tagged["restricted"] is True
+    assert tagged["photography_allowed"] is False
+    assert listed["A04"]["restriction_type"] == ""
+    assert listed["A04"]["restricted"] is False
+    assert listed["A04"]["photography_allowed"] is True
+
+    r1 = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "R1", "row_id": by_name["A01"]["id"]},
+    ).json()
+    r2 = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "R2", "row_id": by_name["A01"]["id"]},
+    ).json()
+    tagged_rack = client.patch(
+        f"/api/projects/{pid}/racks/{r1['id']}",
+        headers=auth,
+        json={"name": "R1", "restriction_type": "government"},
+    ).json()
+    racks = {r["id"]: r for r in client.get(f"/api/projects/{pid}/racks", headers=auth).json()}
+    assert tagged_rack["restriction_type"] == "government"
+    assert tagged_rack["restricted"] is True
+    assert racks[r2["id"]]["restriction_type"] == ""
+    assert racks[r2["id"]]["restricted"] is False
+    assert racks[r2["id"]]["photography_allowed"] is True
+
+    a04_rack = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "R4", "row_id": by_name["A04"]["id"]},
+    ).json()
+    assert a04_rack["restricted"] is False
+    assert a04_rack["restriction_type"] == ""
+
+
 
 
 
