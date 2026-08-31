@@ -86,6 +86,7 @@ export default function Project() {
   const [importOpen, setImportOpen] = useState(false);
   const [editing, setEditing] = useState<Device | null>(null);
   const [openArea, setOpenArea] = useState<number | null>(null);
+  const [openRow, setOpenRow] = useState<number | null>(null);
   const [editingArea, setEditingArea] = useState<Area | null>(null);
   const [selectMode, setSelectMode] = useState<SelectMode>("one");
   const [selected, setSelected] = useState<number[]>([]);
@@ -622,8 +623,10 @@ export default function Project() {
             const rackCount = racks.filter((rack) => rack.row_id === r.id).length;
             const watts = sumPowerWatts(devices, rackIdsForRow(r.id, racks));
             const amps = sumDcAmps(devices, rackIdsForRow(r.id, racks));
+            const parentArea = areas.find((a) => a.id === r.area_id);
             return (
-            <div className="list-item" key={r.id}>
+            <div key={r.id}>
+            <div className="list-item">
               <div className="list-main">
                 <ItemSelect mode={selectMode} group="row-pick" id={r.id} selected={selected} onChange={setSelected} />
                 <button
@@ -634,12 +637,19 @@ export default function Project() {
                   <span>
                     <strong>{r.name}</strong>
                     <div className="muted">
-                      {areas.find((a) => a.id === r.area_id)?.name || "no area"} · {rackCount} rack
+                      {parentArea?.name || "no area"} · {rackCount} rack
                       {rackCount === 1 ? "" : "s"} · {formatHierarchyPower(watts, amps)}
                     </div>
                   </span>
                 </button>
               </div>
+              <button type="button" className="btn" onClick={() => setOpenRow(openRow === r.id ? null : r.id)}>
+                Photos
+              </button>
+            </div>
+            {openRow === r.id && (
+              <PhotoGallery entityType="row" entityId={r.id} allowed={parentArea?.photography_allowed !== false} />
+            )}
             </div>
             );
           })}

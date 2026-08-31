@@ -41,7 +41,8 @@ from app.schemas import (
     VisionSessionStatusIn,
 )
 from app.vision_review import confirm_layout_field, confirm_proposal_field, skip_layout_field, skip_proposal_field
-from app.storage import get_storage, new_key
+from app.media_paths import hierarchy_key
+from app.storage import get_storage
 from app.vision_policy import (
     RESTRICTED_REFUSAL,
     blank_unreadable,
@@ -428,6 +429,7 @@ async def add_clip(
     timestamp_ms: Optional[int] = Form(None),
     notes: str = Form(""),
     photography_restricted: bool = Form(False),
+    ru: int | None = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     user: User = Depends(VisionWorker),
@@ -441,7 +443,7 @@ async def add_clip(
     data = await file.read()
     if len(data) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(413, f"File exceeds {settings.max_upload_mb} MB")
-    key = new_key(file.filename or "clip.bin")
+    key = hierarchy_key(db, "vision_session", session.id, file.filename or "clip.bin", ru=ru)
     get_storage().put(key, data)
     attachment = Attachment(
         entity_type="vision_session",
