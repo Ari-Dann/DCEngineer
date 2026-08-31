@@ -49,6 +49,9 @@ class Project(Base):
     photography_rules: Mapped[str] = mapped_column(Text, default="")
     data_handling_rules: Mapped[str] = mapped_column(Text, default="")
     restricted_equipment_notes: Mapped[str] = mapped_column(Text, default="")
+    restricted: Mapped[bool] = mapped_column(Boolean, default=False)
+    restriction_type: Mapped[str] = mapped_column(String(64), default="")  # government / EMSS / other
+    photography_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
     in_scope_summary: Mapped[str] = mapped_column(Text, default="")
     discovery_port_access: Mapped[str] = mapped_column(String(32), default="unknown")
     discovery_cdp_lldp: Mapped[str] = mapped_column(String(32), default="unknown")
@@ -92,6 +95,9 @@ class AisleRow(Base):
     area_id: Mapped[Optional[int]] = mapped_column(ForeignKey("areas.id", ondelete="SET NULL"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(128), index=True)
     notes: Mapped[str] = mapped_column(Text, default="")
+    restricted: Mapped[bool] = mapped_column(Boolean, default=False)
+    restriction_type: Mapped[str] = mapped_column(String(64), default="")  # government / EMSS / other
+    photography_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     project: Mapped["Project"] = relationship(back_populates="aisle_rows")
@@ -112,6 +118,9 @@ class Rack(Base):
     ru_height: Mapped[int] = mapped_column(Integer, default=42)
     width_inches: Mapped[float] = mapped_column(Float, default=19.0)
     notes: Mapped[str] = mapped_column(Text, default="")
+    restricted: Mapped[bool] = mapped_column(Boolean, default=False)
+    restriction_type: Mapped[str] = mapped_column(String(64), default="")  # government / EMSS / other
+    photography_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     project: Mapped["Project"] = relationship(back_populates="racks")

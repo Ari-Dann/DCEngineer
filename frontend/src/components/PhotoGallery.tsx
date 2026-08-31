@@ -45,7 +45,7 @@ export default function PhotoGallery({ entityType, entityId, allowed = true, res
   }, [entityType, entityId]);
 
   if (!allowed) {
-    return <p className="muted">Photography is not allowed in this area.</p>;
+    return <p className="muted">Photography is not allowed here (government / EMSS).</p>;
   }
 
   return (

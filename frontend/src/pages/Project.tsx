@@ -27,7 +27,16 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PromptDialog } from "../components/PromptDialog";
 import { ItemSelect, SelectMode, SelectModeToggle, SelectionToolbar } from "../components/SelectionBar";
 import AiImageParse, { EntryMode, EntryModeRadios } from "../components/AiImageParse";
+import RestrictionPicker from "../components/RestrictionPicker";
 import { parseIdParam, projectHref, rackHref } from "../nav";
+import {
+  inheritedPhotoBlockers,
+  photosAllowed,
+  restrictionCaption,
+  restrictionFields,
+  restrictionTypeOf,
+  type RestrictionType,
+} from "../restriction";
 
 const TABS = ["overview", "areas", "rows", "racks", "devices", "locate", "cables", "checklists", "handoffs", "lifecycle"] as const;
 type Tab = (typeof TABS)[number];
@@ -88,6 +97,11 @@ export default function Project() {
   const [openArea, setOpenArea] = useState<number | null>(null);
   const [openRow, setOpenRow] = useState<number | null>(null);
   const [editingArea, setEditingArea] = useState<Area | null>(null);
+  const [editingRow, setEditingRow] = useState<AisleRow | null>(null);
+  const [editingRack, setEditingRack] = useState<Rack | null>(null);
+  const [areaRestriction, setAreaRestriction] = useState<RestrictionType>("");
+  const [rowRestriction, setRowRestriction] = useState<RestrictionType>("");
+  const [rackRestriction, setRackRestriction] = useState<RestrictionType>("");
   const [selectMode, setSelectMode] = useState<SelectMode>("one");
   const [selected, setSelected] = useState<number[]>([]);
   const [relocate, setRelocate] = useState<{ kind: RelocateKind; ids: number[]; mode: "copy" | "move" } | null>(null);
@@ -97,8 +111,6 @@ export default function Project() {
     name: string;
     detail: string;
   } | null>(null);
-  const [renamingRow, setRenamingRow] = useState<AisleRow | null>(null);
-  const [renamingRack, setRenamingRack] = useState<Rack | null>(null);
   const [renamingProject, setRenamingProject] = useState(false);
   const [hand, setHand] = useState({
     handoff_date: new Date().toISOString().slice(0, 10),
@@ -381,8 +393,13 @@ export default function Project() {
                 onChange={(e) => setProject({ ...project, photography_rules: e.target.value })}
               />
             </label>
+            <RestrictionPicker
+              name="project-restriction"
+              value={restrictionTypeOf(project)}
+              onChange={(type) => setProject({ ...project, ...restrictionFields(type) })}
+            />
             <label className="field">
-              <span>Restricted equipment</span>
+              <span>Restricted equipment notes</span>
               <textarea
                 value={project.restricted_equipment_notes}
                 onChange={(e) => setProject({ ...project, restricted_equipment_notes: e.target.value })}
@@ -398,7 +415,7 @@ export default function Project() {
             <button className="btn primary">Save</button>
           </form>
           <div className="card" style={{ marginTop: 12 }}>
-            <PhotoGallery entityType="project" entityId={pid} />
+            <PhotoGallery entityType="project" entityId={pid} allowed={photosAllowed({ project })} />
           </div>
         </>
       )}
@@ -408,18 +425,20 @@ export default function Project() {
           <EntryModeRadios name="entry-areas" value={areaMode} onChange={setAreaMode} />
           <p className="muted">Click an area to open its rows. Use Individual or Bulk to select items to edit, move, or delete.</p>
           {areaMode === "ai" ? (
-            <AiImageParse projectId={pid} target="area" areas={areas} onInventoryChanged={load} />
+            <AiImageParse projectId={pid} target="area" project={project} areas={areas} onInventoryChanged={load} />
           ) : (
           <form
             onSubmit={async (e) => {
               e.preventDefault();
-              await projects.addArea(pid, { name: areaName });
+              await projects.addArea(pid, { name: areaName, ...restrictionFields(areaRestriction) });
               setAreaName("");
+              setAreaRestriction("");
               load();
             }}
             style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
           >
             <input placeholder="Area / cage / hall" value={areaName} onChange={(e) => setAreaName(e.target.value)} required />
+            <RestrictionPicker name="new-area-restriction" value={areaRestriction} onChange={setAreaRestriction} inherited={inheritedPhotoBlockers({ project })} />
             <button className="btn primary">Add</button>
             {canImport && (
               <button type="button" className="btn" onClick={() => setImportOpen(true)}>
@@ -470,8 +489,7 @@ export default function Project() {
                         <strong>{a.name}</strong>
                         <div className="muted">
                           {nested} row{nested === 1 ? "" : "s"} · {rackCount} rack{rackCount === 1 ? "" : "s"} ·{" "}
-                          {formatHierarchyPower(watts, amps)} · {a.restricted ? a.restriction_type || "restricted" : "in scope"} · photos{" "}
-                          {a.photography_allowed ? "allowed" : "forbidden"}
+                          {formatHierarchyPower(watts, amps)} · {restrictionCaption(a, inheritedPhotoBlockers({ project }))}
                         </div>
                       </span>
                     </button>
@@ -494,26 +512,18 @@ export default function Project() {
                       <span>Name</span>
                       <input value={editingArea.name} onChange={(e) => setEditingArea({ ...editingArea, name: e.target.value })} />
                     </label>
-                    <label className="check-row">
-                      <input
-                        type="checkbox"
-                        checked={editingArea.restricted}
-                        onChange={(e) => setEditingArea({ ...editingArea, restricted: e.target.checked })}
-                      />
-                      <span>Restricted</span>
-                    </label>
-                    <label className="check-row">
-                      <input
-                        type="checkbox"
-                        checked={editingArea.photography_allowed}
-                        onChange={(e) => setEditingArea({ ...editingArea, photography_allowed: e.target.checked })}
-                      />
-                      <span>Photography allowed</span>
-                    </label>
+                    <RestrictionPicker
+                      name={`area-restriction-${a.id}`}
+                      value={restrictionTypeOf(editingArea)}
+                      onChange={(type) => setEditingArea({ ...editingArea, ...restrictionFields(type) })}
+                      inherited={inheritedPhotoBlockers({ project })}
+                    />
                     <button className="btn primary">Save area</button>
                   </form>
                 )}
-                {openArea === a.id && <PhotoGallery entityType="area" entityId={a.id} allowed={a.photography_allowed} />}
+                {openArea === a.id && (
+                  <PhotoGallery entityType="area" entityId={a.id} allowed={photosAllowed({ project, area: a })} />
+                )}
               </div>
             );
           })}
@@ -551,7 +561,9 @@ export default function Project() {
               projectId={pid}
               target="row"
               areaId={rowAreaId || areaFilter || ""}
+              project={project}
               areas={areas}
+              rows={aisleRows}
               onInventoryChanged={load}
             />
           ) : (
@@ -569,9 +581,14 @@ export default function Project() {
                 return;
               }
               setError("");
-              await projects.addRows(pid, { area_id: Number(targetArea), names });
+              await projects.addRows(pid, {
+                area_id: Number(targetArea),
+                names,
+                ...restrictionFields(rowRestriction),
+              });
               setRowName("");
               setRowBulk("");
+              setRowRestriction("");
               load();
             }}
             style={{ display: "grid", gap: 8 }}
@@ -592,6 +609,15 @@ export default function Project() {
               <span>Or a set of rows (one per line)</span>
               <textarea value={rowBulk} onChange={(e) => setRowBulk(e.target.value)} placeholder={"A01\nA02\nA03"} rows={4} />
             </label>
+            <RestrictionPicker
+              name="new-row-restriction"
+              value={rowRestriction}
+              onChange={setRowRestriction}
+              inherited={inheritedPhotoBlockers({
+                project,
+                area: areas.find((a) => a.id === (rowAreaId || areaFilter || 0)) || null,
+              })}
+            />
             <button className="btn primary" disabled={!rowAreaId && !areaFilter}>
               Create rows
             </button>
@@ -611,7 +637,7 @@ export default function Project() {
             onClear={() => setSelected([])}
             onEdit={() => {
               const row = aisleRows.find((r) => r.id === selected[0]);
-              if (row) setRenamingRow(row);
+              if (row) setEditingRow(row);
             }}
             onCopy={() => setRelocate({ kind: "row", ids: selected, mode: "copy" })}
             onMove={() => setRelocate({ kind: "row", ids: selected, mode: "move" })}
@@ -644,7 +670,8 @@ export default function Project() {
                     <strong>{r.name}</strong>
                     <div className="muted">
                       {parentArea?.name || "no area"} · {rackCount} rack
-                      {rackCount === 1 ? "" : "s"} · {formatHierarchyPower(watts, amps)}
+                      {rackCount === 1 ? "" : "s"} · {formatHierarchyPower(watts, amps)} ·{" "}
+                      {restrictionCaption(r, inheritedPhotoBlockers({ project, area: parentArea }))}
                     </div>
                   </span>
                 </button>
@@ -653,8 +680,35 @@ export default function Project() {
                 Photos
               </button>
             </div>
+            {editingRow?.id === r.id && (
+              <form
+                className="card"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  await projects.updateRow(pid, r.id, editingRow);
+                  setEditingRow(null);
+                  load();
+                }}
+              >
+                <label className="field">
+                  <span>Name</span>
+                  <input value={editingRow.name} onChange={(e) => setEditingRow({ ...editingRow, name: e.target.value })} />
+                </label>
+                <RestrictionPicker
+                  name={`row-restriction-${r.id}`}
+                  value={restrictionTypeOf(editingRow)}
+                  onChange={(type) => setEditingRow({ ...editingRow, ...restrictionFields(type) })}
+                  inherited={inheritedPhotoBlockers({ project, area: parentArea })}
+                />
+                <button className="btn primary">Save row</button>
+              </form>
+            )}
             {openRow === r.id && (
-              <PhotoGallery entityType="row" entityId={r.id} allowed={parentArea?.photography_allowed !== false} />
+              <PhotoGallery
+                entityType="row"
+                entityId={r.id}
+                allowed={photosAllowed({ project, area: parentArea, row: r })}
+              />
             )}
             </div>
             );
@@ -713,7 +767,10 @@ export default function Project() {
               target="rack"
               areaId={areaFilter || ""}
               rowId={rowFilter || ""}
+              project={project}
               areas={areas}
+              rows={aisleRows}
+              racks={racks}
               onInventoryChanged={load}
             />
           ) : (
@@ -726,8 +783,10 @@ export default function Project() {
                 row_id: rowFilter || null,
                 area_id: areaFilter || null,
                 row_label: rowsForArea.find((r) => r.id === rowFilter)?.name || "",
+                ...restrictionFields(rackRestriction),
               });
               setRackName("");
+              setRackRestriction("");
               load();
             }}
           >
@@ -738,6 +797,16 @@ export default function Project() {
               </label>
             </div>
             <RackHeightField value={rackHeight} onChange={setRackHeight} />
+            <RestrictionPicker
+              name="new-rack-restriction"
+              value={rackRestriction}
+              onChange={setRackRestriction}
+              inherited={inheritedPhotoBlockers({
+                project,
+                area: areas.find((a) => a.id === (areaFilter || 0)) || null,
+                row: aisleRows.find((r) => r.id === (rowFilter || 0)) || null,
+              })}
+            />
             <button className="btn primary" disabled={!rowFilter}>
               Add rack to row
             </button>
@@ -752,7 +821,7 @@ export default function Project() {
             onClear={() => setSelected([])}
             onEdit={() => {
               const rack = racks.find((r) => r.id === selected[0]);
-              if (rack) setRenamingRack(rack);
+              if (rack) setEditingRack(rack);
             }}
             onCopy={() => setRelocate({ kind: "rack", ids: selected, mode: "copy" })}
             onMove={() => setRelocate({ kind: "rack", ids: selected, mode: "move" })}
@@ -766,8 +835,12 @@ export default function Project() {
               });
             }}
           />
-          {racksForRow.map((r) => (
-            <div className="list-item" key={r.id}>
+          {racksForRow.map((r) => {
+            const parentRow = aisleRows.find((row) => row.id === r.row_id);
+            const parentArea = areas.find((a) => a.id === (r.area_id || parentRow?.area_id));
+            return (
+            <div key={r.id}>
+            <div className="list-item">
               <div className="list-main">
                 <ItemSelect mode={selectMode} group="rack-pick" id={r.id} selected={selected} onChange={setSelected} />
                 <Link
@@ -777,13 +850,39 @@ export default function Project() {
                   <span>
                     <strong>{r.name}</strong>
                     <div className="muted">
-                      {layoutPath(r, aisleRows, areas)} · {r.ru_height}U · {formatHierarchyPower(sumPowerWatts(devices, [r.id]), sumDcAmps(devices, [r.id]))}
+                      {layoutPath(r, aisleRows, areas)} · {r.ru_height}U · {formatHierarchyPower(sumPowerWatts(devices, [r.id]), sumDcAmps(devices, [r.id]))} ·{" "}
+                      {restrictionCaption(r, inheritedPhotoBlockers({ project, area: parentArea, row: parentRow }))}
                     </div>
                   </span>
                 </Link>
               </div>
             </div>
-          ))}
+            {editingRack?.id === r.id && (
+              <form
+                className="card"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  await projects.updateRack(pid, r.id, editingRack);
+                  setEditingRack(null);
+                  load();
+                }}
+              >
+                <label className="field">
+                  <span>Name</span>
+                  <input value={editingRack.name} onChange={(e) => setEditingRack({ ...editingRack, name: e.target.value })} />
+                </label>
+                <RestrictionPicker
+                  name={`rack-restriction-${r.id}`}
+                  value={restrictionTypeOf(editingRack)}
+                  onChange={(type) => setEditingRack({ ...editingRack, ...restrictionFields(type) })}
+                  inherited={inheritedPhotoBlockers({ project, area: parentArea, row: parentRow })}
+                />
+                <button className="btn primary">Save rack</button>
+              </form>
+            )}
+            </div>
+            );
+          })}
         </div>
       )}
 
@@ -846,7 +945,10 @@ export default function Project() {
                 areaId={deviceArea || ""}
                 rowId={deviceRow || ""}
                 rackId={deviceRack || ""}
+                project={project}
                 areas={areas}
+                rows={aisleRows}
+                racks={racks}
                 onInventoryChanged={load}
               />
             )}
@@ -926,7 +1028,7 @@ export default function Project() {
                       </td>
                       <td>
                         {d.name}
-                        {d.restricted ? " 🔒" : ""}
+                        {d.restricted || !photosAllowed({ project, area, row, rack }) ? " 🔒" : ""}
                         {d.undocumented ? " ⚠" : ""}
                       </td>
                       <td>{d.owner || "—"}</td>
@@ -1136,6 +1238,7 @@ export default function Project() {
       {editing && (
         <DeviceEditorModal
           projectId={pid}
+          project={project}
           device={editing}
           racks={racks}
           areas={areas}
@@ -1205,30 +1308,6 @@ export default function Project() {
           onClose={() => setRenamingProject(false)}
           onSave={async (name) => {
             await projects.update(pid, { ...project, name });
-            load();
-          }}
-        />
-      )}
-      {renamingRow && (
-        <PromptDialog
-          title={`Rename row “${renamingRow.name}”?`}
-          label="Row / aisle name"
-          initial={renamingRow.name}
-          onClose={() => setRenamingRow(null)}
-          onSave={async (name) => {
-            await projects.updateRow(pid, renamingRow.id, { name, area_id: renamingRow.area_id, notes: renamingRow.notes });
-            load();
-          }}
-        />
-      )}
-      {renamingRack && (
-        <PromptDialog
-          title={`Rename rack “${renamingRack.name}”?`}
-          label="Rack name"
-          initial={renamingRack.name}
-          onClose={() => setRenamingRack(null)}
-          onSave={async (name) => {
-            await projects.updateRack(pid, renamingRack.id, { ...renamingRack, name });
             load();
           }}
         />

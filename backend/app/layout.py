@@ -58,9 +58,18 @@ def bulk_create_rows(
     project_id: int,
     area_id: int,
     names: list[str],
+    *,
+    restricted: bool = False,
+    restriction_type: str = "",
+    photography_allowed: bool = True,
 ) -> tuple[list[AisleRow], list[AisleRow]]:
     created: list[AisleRow] = []
     existing: list[AisleRow] = []
+    flags = {
+        "restricted": restricted,
+        "restriction_type": restriction_type,
+        "photography_allowed": photography_allowed,
+    }
     for label in unique_labels(names):
         row = (
             db.query(AisleRow)
@@ -81,7 +90,7 @@ def bulk_create_rows(
             unassigned.area_id = area_id
             existing.append(unassigned)
             continue
-        row = AisleRow(project_id=project_id, area_id=area_id, name=label)
+        row = AisleRow(project_id=project_id, area_id=area_id, name=label, **flags)
         db.add(row)
         db.flush()
         created.append(row)

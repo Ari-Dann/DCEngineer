@@ -33,6 +33,7 @@ from app.catalog import learn_values
 from app.importer import import_devices, preview_import
 from app.layout import apply_relocate, apply_row_to_rack, backfill_rows, bulk_create_rows, resolve_or_create_row, unique_labels
 from app.rbi_export import eol_status
+from app.restriction import apply_flags
 from app.schemas import (
     AreaIn,
     AreaOut,
@@ -193,8 +194,8 @@ def update_project(
     project_id: int, body: ProjectIn, db: Session = Depends(get_db), user: User = Depends(WriteUser)
 ):
     project = _get_project(db, project_id)
-    data = body.model_dump()
-    if data.get("name") != project.name and user.role != "admin":
+    data = apply_flags(body.model_dump(exclude_unset=True))
+    if data.get("name") not in (None, project.name) and user.role != "admin":
         raise HTTPException(403, "Only an admin can rename a project")
     _apply(project, data)
     project.updated_at = datetime.now(timezone.utc)
@@ -242,7 +243,7 @@ def list_areas(project_id: int, db: Session = Depends(get_db), _: User = Depends
 @projects_router.post("/{project_id}/areas", response_model=AreaOut, status_code=201)
 def create_area(project_id: int, body: AreaIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)):
     _get_project(db, project_id)
-    area = Area(project_id=project_id, **body.model_dump())
+    area = Area(project_id=project_id, **apply_flags(body.model_dump()))
     db.add(area)
     db.commit()
     db.refresh(area)
@@ -254,7 +255,7 @@ def update_area(project_id: int, area_id: int, body: AreaIn, db: Session = Depen
     area = db.get(Area, area_id)
     if not area or area.project_id != project_id:
         raise HTTPException(404, "Area not found")
-    _apply(area, body.model_dump())
+    _apply(area, apply_flags(body.model_dump(exclude_unset=True)))
     db.commit()
     db.refresh(area)
     return area
@@ -294,7 +295,7 @@ def create_row(project_id: int, body: RowIn, db: Session = Depends(get_db), _: U
     _get_project(db, project_id)
     if body.area_id:
         _get_area(db, project_id, body.area_id)
-    row = AisleRow(project_id=project_id, **body.model_dump())
+    row = AisleRow(project_id=project_id, **apply_flags(body.model_dump()))
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -308,7 +309,14 @@ def create_rows_bulk(project_id: int, body: RowBulkIn, db: Session = Depends(get
     labels = unique_labels(body.names)
     if not labels:
         raise HTTPException(400, "Enter at least one row name")
-    created, existing = bulk_create_rows(db, project_id, body.area_id, labels)
+    flags = apply_flags(
+        {
+            "restricted": body.restricted,
+            "restriction_type": body.restriction_type,
+            "photography_allowed": body.photography_allowed,
+        }
+    )
+    created, existing = bulk_create_rows(db, project_id, body.area_id, labels, **flags)
     db.commit()
     for row in created + existing:
         db.refresh(row)
@@ -320,7 +328,7 @@ def update_row(project_id: int, row_id: int, body: RowIn, db: Session = Depends(
     row = _get_row(db, project_id, row_id)
     if body.area_id:
         _get_area(db, project_id, body.area_id)
-    _apply(row, body.model_dump())
+    _apply(row, apply_flags(body.model_dump(exclude_unset=True)))
     for rack in db.query(Rack).filter(Rack.row_id == row.id).all():
         rack.row_label = row.name
         rack.area_id = row.area_id
@@ -361,7 +369,7 @@ def list_racks(
 @projects_router.post("/{project_id}/racks", response_model=RackOut, status_code=201)
 def create_rack(project_id: int, body: RackIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)):
     _get_project(db, project_id)
-    data = body.model_dump()
+    data = apply_flags(body.model_dump())
     row = resolve_or_create_row(
         db, project_id, row_id=data.get("row_id"), row_label=data.get("row_label") or "", area_id=data.get("area_id")
     )
@@ -380,7 +388,7 @@ def create_rack(project_id: int, body: RackIn, db: Session = Depends(get_db), _:
 @projects_router.patch("/{project_id}/racks/{rack_id}", response_model=RackOut)
 def update_rack(project_id: int, rack_id: int, body: RackIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)):
     rack = _get_rack(db, project_id, rack_id)
-    data = body.model_dump()
+    data = apply_flags(body.model_dump(exclude_unset=True))
     row = resolve_or_create_row(
         db, project_id, row_id=data.get("row_id"), row_label=data.get("row_label") or "", area_id=data.get("area_id")
     )

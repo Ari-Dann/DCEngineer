@@ -267,7 +267,8 @@ def collect_layout(db: Session, project: Project) -> Layout:
                     "Vendor": "",
                     "Model": "",
                     "Picture": "; ".join(p.zip_path for p in pics),
-                    "Notes": area.description or area.restriction_type or "",
+                    "Notes": area.description
+                    or (f"{area.restriction_type} — no photos" if area.restricted or not area.photography_allowed else ""),
                 },
                 pictures=pics,
             )
@@ -290,7 +291,8 @@ def collect_layout(db: Session, project: Project) -> Layout:
                     "Vendor": "",
                     "Model": "",
                     "Picture": "",
-                    "Notes": row.notes or "",
+                    "Notes": row.notes
+                    or (f"{row.restriction_type} — no photos" if row.restricted or not row.photography_allowed else ""),
                 },
             )
         )
@@ -317,7 +319,8 @@ def collect_layout(db: Session, project: Project) -> Layout:
                     "Vendor": "",
                     "Model": "",
                     "Picture": "; ".join(p.zip_path for p in pics),
-                    "Notes": rack.notes or "",
+                    "Notes": rack.notes
+                    or (f"{rack.restriction_type} — no photos" if rack.restricted or not rack.photography_allowed else ""),
                 },
                 pictures=pics,
             )

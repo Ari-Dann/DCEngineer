@@ -61,6 +61,19 @@ def init_db() -> None:
 def _ensure_columns() -> None:
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
+    restriction_cols = {
+        "restricted": "BOOLEAN DEFAULT 0",
+        "restriction_type": "VARCHAR(64) DEFAULT ''",
+        "photography_allowed": "BOOLEAN DEFAULT 1",
+    }
+    for table in ("projects", "aisle_rows", "racks"):
+        if table not in tables:
+            continue
+        cols = {c["name"] for c in inspector.get_columns(table)}
+        with engine.begin() as conn:
+            for name, ddl in restriction_cols.items():
+                if name not in cols:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
     if "racks" in tables:
         cols = {c["name"] for c in inspector.get_columns("racks")}
         if "row_id" not in cols:

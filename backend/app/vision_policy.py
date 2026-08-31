@@ -4,48 +4,19 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.models import AisleRow, Area, Attachment, Rack, VisionClip, VisionSession
+from app.models import Attachment, VisionClip, VisionSession
+from app.restriction import hierarchy_reasons, resolve_session_location
 
 RESTRICTED_REFUSAL = "Restricted equipment — photos were not sent to the vision model."
 
 
-def _area_reasons(area: Area | None) -> list[str]:
-    if not area:
-        return []
-    reasons: list[str] = []
-    if area.restricted:
-        label = area.restriction_type or "restricted"
-        reasons.append(f"Area {area.name} is flagged {label}")
-    if not area.photography_allowed:
-        reasons.append(f"Photography is forbidden in area {area.name}")
-    return reasons
-
-
-def resolve_session_area(db: Session, session: VisionSession) -> Area | None:
-    if session.area_id:
-        area = db.get(Area, session.area_id)
-        if area:
-            return area
-    if session.rack_id:
-        rack = db.get(Rack, session.rack_id)
-        if rack:
-            if rack.area_id:
-                area = db.get(Area, rack.area_id)
-                if area:
-                    return area
-            if rack.row_id:
-                row = db.get(AisleRow, rack.row_id)
-                if row and row.area_id:
-                    return db.get(Area, row.area_id)
-    if session.row_id:
-        row = db.get(AisleRow, session.row_id)
-        if row and row.area_id:
-            return db.get(Area, row.area_id)
-    return None
+def resolve_session_area(db: Session, session: VisionSession):
+    _project, area, _row, _rack = resolve_session_location(db, session)
+    return area
 
 
 def restriction_reasons(db: Session, session: VisionSession) -> list[str]:
-    reasons = _area_reasons(resolve_session_area(db, session))
+    reasons = hierarchy_reasons(db, session)
     clips = db.query(VisionClip).filter(VisionClip.session_id == session.id).all()
     attachment_ids = [c.attachment_id for c in clips]
     if attachment_ids:

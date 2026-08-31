@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { AisleRow, Area, Device, Elevation, PDU, Rack, downloadAuth, layoutPath, projects, uploadPhotos } from "../api";
+import { AisleRow, Area, Device, Elevation, PDU, Project, Rack, downloadAuth, layoutPath, projects, uploadPhotos } from "../api";
 import { formatHierarchyPower, sumDcAmps, sumPowerWatts } from "../power";
 import {
   DeviceDraft,
@@ -13,8 +13,10 @@ import {
 import PhotoGallery from "../components/PhotoGallery";
 import RelocateDialog, { RelocateKind } from "../components/RelocateDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import RestrictionPicker from "../components/RestrictionPicker";
 import { parseIdParam, projectHref } from "../nav";
 import AiImageParse, { EntryMode, EntryModeRadios } from "../components/AiImageParse";
+import { inheritedPhotoBlockers, photosAllowed, restrictionFields, restrictionTypeOf } from "../restriction";
 
 export default function RackPage() {
   const { id, rackId } = useParams();
@@ -26,6 +28,7 @@ export default function RackPage() {
   const [racks, setRacks] = useState<Rack[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
   const [aisleRows, setAisleRows] = useState<AisleRow[]>([]);
+  const [project, setProject] = useState<Project | null>(null);
   const [pdus, setPdus] = useState<PDU[]>([]);
   const [error, setError] = useState("");
   const [draft, setDraft] = useState<DeviceDraft>(emptyDraft(rid));
@@ -49,6 +52,7 @@ export default function RackPage() {
       setRacks(await projects.racks(pid));
       setAreas(await projects.areas(pid));
       setAisleRows(await projects.rows(pid));
+      setProject(await projects.get(pid));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     }
@@ -88,6 +92,10 @@ export default function RackPage() {
   const backRow = parseIdParam(params.get("row")) || elev.rack.row_id || "";
   const backRowName = aisleRows.find((r) => r.id === backRow)?.name || elev.rack.row_label || "row";
   const backHref = projectHref(pid, { tab: backRow ? "racks" : "rows", area: backArea, row: backRow });
+  const parentRow = aisleRows.find((r) => r.id === elev.rack.row_id);
+  const parentArea = areas.find((a) => a.id === (elev.rack.area_id || parentRow?.area_id));
+  const rackInherited = inheritedPhotoBlockers({ project, area: parentArea, row: parentRow });
+  const rackPhotosOk = photosAllowed({ project, area: parentArea, row: parentRow, rack: elev.rack });
 
   return (
     <div className="page">
@@ -121,6 +129,7 @@ export default function RackPage() {
           <p>
             {layoutPath(elev.rack, aisleRows, areas)} · {elev.rack.ru_height}U ·{" "}
             {formatHierarchyPower(sumPowerWatts(elev.devices, [rid]), sumDcAmps(elev.devices, [rid]))}
+            {rackPhotosOk ? "" : " · no photos"}
           </p>
         </div>
         <button
@@ -164,8 +173,14 @@ export default function RackPage() {
           <form className="card" onSubmit={saveRack}>
             <h3>Edit rack</h3>
             <RackHeightField value={height} onChange={setHeight} />
+            <RestrictionPicker
+              name="rack-page-restriction"
+              value={restrictionTypeOf(elev.rack)}
+              onChange={(type) => setElev({ ...elev, rack: { ...elev.rack, ...restrictionFields(type) } })}
+              inherited={rackInherited}
+            />
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn">Save rack height</button>
+              <button className="btn">Save rack</button>
               <button
                 type="button"
                 className="btn"
@@ -206,7 +221,10 @@ export default function RackPage() {
                 areaId={elev.rack.area_id || ""}
                 rowId={elev.rack.row_id || ""}
                 rackId={rid}
+                project={project}
                 areas={areas}
+                rows={aisleRows}
+                racks={racks}
                 onInventoryChanged={load}
               />
             ) : (
@@ -219,6 +237,7 @@ export default function RackPage() {
                   rows={aisleRows}
                   devices={elev.devices}
                   pdus={pdus}
+                  project={project}
                   showLocation={false}
                   pendingPhotos={photos}
                   onPendingPhotos={setPhotos}
@@ -228,7 +247,7 @@ export default function RackPage() {
             )}
           </form>
           <div className="card" style={{ marginTop: 12 }}>
-            <PhotoGallery entityType="rack" entityId={rid} />
+            <PhotoGallery entityType="rack" entityId={rid} allowed={rackPhotosOk} restricted={!rackPhotosOk} />
           </div>
           <div className="card" style={{ marginTop: 12 }}>
             <h3>PDU mapping</h3>
@@ -295,6 +314,7 @@ export default function RackPage() {
       {adding && (
         <DeviceEditorModal
           projectId={pid}
+          project={project}
           racks={racks}
           areas={areas}
           rows={aisleRows}
@@ -312,6 +332,7 @@ export default function RackPage() {
       {editing && (
         <DeviceEditorModal
           projectId={pid}
+          project={project}
           device={editing}
           racks={racks}
           areas={areas}

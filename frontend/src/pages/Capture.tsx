@@ -7,6 +7,7 @@ import AiImageParse, { EntryMode, EntryModeRadios } from "../components/AiImageP
 import type { DeviceDraft } from "../components/DeviceEditor";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { learnCatalog } from "../catalog";
+import { photosAllowed } from "../restriction";
 
 export default function Capture() {
   const [plist, setPlist] = useState<Project[]>([]);
@@ -138,6 +139,15 @@ export default function Capture() {
       <h1>Onsite capture</h1>
       <p>Phase 2 intake. Create rows under an area (typed or from aisle photos), then capture rack by rack.</p>
       {project?.photography_rules && <div className="banner">{project.photography_rules}</div>}
+      {project &&
+        !photosAllowed({
+          project,
+          area: areas.find((a) => a.id === areaId) || null,
+          row: aisleRows.find((r) => r.id === rowId) || null,
+          rack: racks.find((r) => r.id === rid) || null,
+        }) && (
+          <div className="banner">This location is tagged government / EMSS — photography is blocked.</div>
+        )}
       {error && <div className="error">{error}</div>}
       {msg && <div className="success">{msg}</div>}
       <div className="card">
@@ -180,6 +190,7 @@ export default function Capture() {
           rows={aisleRows}
           racks={racks}
           areaId={areaId}
+          project={project}
           onAreaChange={(next) => {
             setAreaId(next);
             setRowId("");
@@ -236,7 +247,10 @@ export default function Capture() {
               areaId={areaId}
               rowId={rowId}
               rackId={rid}
+              project={project}
               areas={areas}
+              rows={aisleRows}
+              racks={racks}
               onInventoryChanged={loadDevices}
             />
           ) : (
@@ -252,6 +266,7 @@ export default function Capture() {
           rows={aisleRows}
           devices={devices}
           pdus={pdus}
+          project={project}
           showLocation={false}
           showKnownLocation={false}
           pendingPhotos={photos}
@@ -300,6 +315,7 @@ export default function Capture() {
       {editing && pid && (
         <DeviceEditorModal
           projectId={Number(pid)}
+          project={project}
           device={editing}
           racks={racks}
           areas={areas}

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import {
   Area,
   AisleRow,
+  Project,
   Rack,
   VisionProposal,
   VisionSession,
@@ -13,6 +14,7 @@ import {
 } from "../api";
 import CameraModal from "./CameraModal";
 import VideoRecorder from "./VideoRecorder";
+import { inheritedPhotoBlockers } from "../restriction";
 
 export type EntryMode = "manual" | "ai";
 export type ParseTarget = "area" | "row" | "rack" | "device";
@@ -189,6 +191,7 @@ type Props = {
   areas?: Area[];
   rows?: AisleRow[];
   racks?: Rack[];
+  project?: Project | null;
   onInventoryChanged?: () => void;
 };
 
@@ -199,6 +202,9 @@ export default function AiImageParse({
   rowId = "",
   rackId = "",
   areas = [],
+  rows = [],
+  racks = [],
+  project,
   onInventoryChanged,
 }: Props) {
   const shotKind = SHOT_FOR[target];
@@ -210,7 +216,14 @@ export default function AiImageParse({
   const [edits, setEdits] = useState<Record<string, string>>({});
 
   const selectedArea = areaId ? areas.find((a) => a.id === areaId) : undefined;
-  const selectedAreaBlocked = Boolean(selectedArea && (selectedArea.restricted || !selectedArea.photography_allowed));
+  const selectedRow = rowId ? rows.find((r) => r.id === rowId) : undefined;
+  const selectedRack = rackId ? racks.find((r) => r.id === rackId) : undefined;
+  const blockedHere = inheritedPhotoBlockers({
+    project,
+    area: selectedArea,
+    row: selectedRow,
+    rack: selectedRack,
+  }).length > 0;
 
   async function refresh(id?: number) {
     const sid = id || session?.id;
@@ -301,23 +314,24 @@ export default function AiImageParse({
       {target === "rack" && !rowId && <p className="muted">Open a row so confirmed racks attach to it.</p>}
       {error && <div className="error">{error}</div>}
       {msg && <div className="success">{msg}</div>}
-      {selectedAreaBlocked && (
-        <div className="banner">This area forbids photography. Analyze will refuse to send images to the model.</div>
+      {blockedHere && (
+        <div className="banner">This location is tagged government / EMSS. Photography is blocked and Analyze will not send images.</div>
       )}
       <div className="choice compact">
-        <button type="button" className="btn" disabled={busy} onClick={() => setCam("photo")}>
+        <button type="button" className="btn" disabled={busy || blockedHere} onClick={() => setCam("photo")}>
           Photo
         </button>
-        <button type="button" className="btn" disabled={busy} onClick={() => setCam("video")}>
+        <button type="button" className="btn" disabled={busy || blockedHere} onClick={() => setCam("video")}>
           Video
         </button>
-        <label className="btn" style={{ cursor: "pointer" }}>
+        <label className="btn" style={{ cursor: blockedHere ? "not-allowed" : "pointer" }}>
           Files
           <input
             type="file"
             accept="image/*,video/*"
             multiple
             hidden
+            disabled={busy || blockedHere}
             onChange={async (e) => {
               const files = Array.from(e.target.files || []);
               e.target.value = "";

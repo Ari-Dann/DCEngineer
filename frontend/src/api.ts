@@ -150,7 +150,7 @@ export const projects = {
     api<AisleRow[]>(`/api/projects/${id}/rows${areaId ? `?area_id=${areaId}` : ""}`),
   addRow: (id: number, body: Partial<AisleRow> & { name: string }) =>
     api<AisleRow>(`/api/projects/${id}/rows`, { method: "POST", body: JSON.stringify(body) }),
-  addRows: (id: number, body: { area_id: number; names: string[] }) =>
+  addRows: (id: number, body: { area_id: number; names: string[] } & Partial<AisleRow>) =>
     api<RowBulkResult>(`/api/projects/${id}/rows/bulk`, { method: "POST", body: JSON.stringify(body) }),
   updateRow: (id: number, rowId: number, body: Partial<AisleRow> & { name: string }) =>
     api<AisleRow>(`/api/projects/${id}/rows/${rowId}`, { method: "PATCH", body: JSON.stringify(body) }),
@@ -605,6 +605,9 @@ export type Project = {
   discovery_cdp_lldp: string;
   discovery_saas_trial: string;
   discovery_notes: string;
+  restricted: boolean;
+  restriction_type: string;
+  photography_allowed: boolean;
   start_date?: string | null;
   target_end_date?: string | null;
 };
@@ -626,6 +629,9 @@ export type AisleRow = {
   name: string;
   area_id?: number | null;
   notes: string;
+  restricted: boolean;
+  restriction_type: string;
+  photography_allowed: boolean;
 };
 
 export type RowBulkResult = {
@@ -653,6 +659,9 @@ export type Rack = {
   ru_height: number;
   width_inches: number;
   notes: string;
+  restricted: boolean;
+  restriction_type: string;
+  photography_allowed: boolean;
 };
 
 export type LayoutAcceptResult = RowBulkResult & {

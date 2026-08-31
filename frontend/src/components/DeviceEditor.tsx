@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Catalog, OTHER, learnCatalog, loadCatalog } from "../catalog";
-import { AisleRow, Area, Device, PDU, Rack, pduLabel, projects, uploadPhotos } from "../api";
+import { AisleRow, Area, Device, PDU, Project, Rack, pduLabel, projects, uploadPhotos } from "../api";
 import {
   displayFromWatts,
   formatHierarchyPower,
@@ -13,6 +13,8 @@ import {
 } from "../power";
 import CameraModal from "./CameraModal";
 import PhotoGallery from "./PhotoGallery";
+import RestrictionPicker from "./RestrictionPicker";
+import { deviceRestrictionFields, inheritedPhotoBlockers, photosAllowed, restrictionTypeOf } from "../restriction";
 
 export type DeviceDraft = {
   name: string;
@@ -298,6 +300,7 @@ type Props = {
   onPendingPhotos?: (files: File[]) => void;
   savedDeviceId?: number;
   projectId?: number;
+  project?: Project | null;
   catalogNonce?: number;
 };
 
@@ -315,6 +318,7 @@ export function DeviceFields({
   onPendingPhotos,
   savedDeviceId,
   projectId,
+  project,
   catalogNonce = 0,
 }: Props) {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -334,6 +338,14 @@ export function DeviceFields({
   const selectedRack = racks.find((r) => r.id === value.rack_id);
   const selectedRow = rows.find((r) => r.id === selectedRack?.row_id);
   const selectedArea = areas.find((a) => a.id === (selectedRack?.area_id || selectedRow?.area_id));
+  const inherited = inheritedPhotoBlockers({ project, area: selectedArea, row: selectedRow, rack: selectedRack });
+  const photosOk = photosAllowed({
+    project,
+    area: selectedArea,
+    row: selectedRow,
+    rack: selectedRack,
+    device: { restricted: value.restricted, restricted_reason: value.restricted_reason },
+  });
   const [areaId, setAreaId] = useState<number | "">(selectedArea?.id ?? "");
   const [rowId, setRowId] = useState<number | "">(selectedRow?.id ?? "");
 
@@ -775,21 +787,12 @@ export function DeviceFields({
           </div>
         </>
       )}
-      <label className="check-row">
-        <input type="checkbox" checked={value.restricted} onChange={(e) => set({ restricted: e.target.checked })} />
-        <span>Restricted (government / EMSS) — do not photograph</span>
-      </label>
-      {value.restricted && (
-        <label className="field">
-          <span>Restriction</span>
-          <select value={value.restricted_reason} onChange={(e) => set({ restricted_reason: e.target.value })}>
-            <option value="">—</option>
-            <option>government</option>
-            <option>EMSS</option>
-            <option>other</option>
-          </select>
-        </label>
-      )}
+      <RestrictionPicker
+        name="device-restriction"
+        value={restrictionTypeOf({ restricted: value.restricted, restricted_reason: value.restricted_reason })}
+        onChange={(type) => set(deviceRestrictionFields(type))}
+        inherited={inherited}
+      />
       <label className="check-row">
         <input
           type="checkbox"
@@ -821,14 +824,14 @@ export function DeviceFields({
         <PhotoGallery
           entityType="device"
           entityId={savedDeviceId}
-          allowed={!value.restricted}
-          restricted={value.restricted}
+          allowed={photosOk}
+          restricted={!photosOk}
         />
       ) : (
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
             <h3>Photos ({pendingPhotos?.length || 0})</h3>
-            <button type="button" className="btn" disabled={value.restricted} onClick={() => setCam("photo")}>
+            <button type="button" className="btn" disabled={!photosOk} onClick={() => setCam("photo")}>
               Capture photo
             </button>
           </div>
@@ -862,6 +865,7 @@ export function DeviceEditorModal({
   pdus = [],
   initialDraft,
   showLocation = true,
+  project,
   onClose,
   onSaved,
   onRelocate,
@@ -876,6 +880,7 @@ export function DeviceEditorModal({
   pdus?: PDU[];
   initialDraft?: DeviceDraft;
   showLocation?: boolean;
+  project?: Project | null;
   onClose: () => void;
   onSaved: (d: Device) => void;
   onRelocate?: (mode: "copy" | "move") => void;
@@ -957,6 +962,7 @@ export function DeviceEditorModal({
           showLocation={showLocation}
           savedDeviceId={device?.id}
           projectId={projectId}
+          project={project}
           pendingPhotos={creating ? photos : undefined}
           onPendingPhotos={creating ? setPhotos : undefined}
         />
