@@ -176,8 +176,20 @@ export default function RackPage() {
               name="rack-page-restriction"
               noun="rack"
               value={restrictionTypeOf(elev.rack)}
-              onChange={(type) => setElev({ ...elev, rack: { ...elev.rack, ...restrictionFields(type) } })}
+              onChange={async (type) => {
+                const next = { ...elev.rack, ...restrictionFields(type) };
+                setElev({ ...elev, rack: next });
+                try {
+                  const saved = await projects.updateRack(pid, rid, next);
+                  setElev((current) => (current ? { ...current, rack: saved } : current));
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : "Could not save rack restriction");
+                  load();
+                }
+              }}
               inherited={rackInherited}
+              scope="rack"
+              entityName={elev.rack.name}
             />
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button className="btn">Save rack</button>

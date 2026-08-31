@@ -52,7 +52,10 @@ export default function CreateRowsPanel({
     }
     setBusy(true);
     try {
-      const result = await projects.addRows(projectId, { area_id: Number(areaId), names: list });
+      const result = await projects.addRows(projectId, {
+        area_id: Number(areaId),
+        names: list,
+      });
       setNames("");
       const created = result.created.map((r) => r.name);
       const existing = result.existing.map((r) => r.name);

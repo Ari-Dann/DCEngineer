@@ -6,8 +6,9 @@ import LocatePanel from "../components/LocatePanel";
 import AiImageParse, { EntryMode, EntryModeRadios } from "../components/AiImageParse";
 import type { DeviceDraft } from "../components/DeviceEditor";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { SavedRestrictionPicker } from "../components/RestrictionPicker";
 import { learnCatalog } from "../catalog";
-import { photosAllowed } from "../restriction";
+import { inheritedPhotoBlockers, photosAllowed, restrictionFields } from "../restriction";
 
 export default function Capture() {
   const [plist, setPlist] = useState<Project[]>([]);
@@ -133,6 +134,9 @@ export default function Capture() {
   }
 
   const project = plist.find((p) => p.id === pid);
+  const selectedArea = areas.find((a) => a.id === areaId) || null;
+  const selectedRow = aisleRows.find((r) => r.id === rowId) || null;
+  const selectedRack = racks.find((r) => r.id === rid) || null;
 
   return (
     <div className="page">
@@ -142,9 +146,9 @@ export default function Capture() {
       {project &&
         !photosAllowed({
           project,
-          area: areas.find((a) => a.id === areaId) || null,
-          row: aisleRows.find((r) => r.id === rowId) || null,
-          rack: racks.find((r) => r.id === rid) || null,
+          area: selectedArea,
+          row: selectedRow,
+          rack: selectedRack,
         }) && (
           <div className="banner">This location is tagged government / EMSS — photography is blocked.</div>
         )}
@@ -239,6 +243,40 @@ export default function Capture() {
             </select>
           </label>
         </div>
+        {pid && selectedRow && (
+          <SavedRestrictionPicker
+            name={`capture-row-${selectedRow.id}`}
+            entity={selectedRow}
+            scope="row"
+            inherited={inheritedPhotoBlockers({ project, area: selectedArea })}
+            onPersist={async (type) => {
+              try {
+                const saved = await projects.updateRow(Number(pid), selectedRow.id, { ...selectedRow, ...restrictionFields(type) });
+                setAisleRows((rows) => rows.map((row) => (row.id === saved.id ? saved : row)));
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Could not save row restriction");
+                throw err;
+              }
+            }}
+          />
+        )}
+        {pid && selectedRack && (
+          <SavedRestrictionPicker
+            name={`capture-rack-${selectedRack.id}`}
+            entity={selectedRack}
+            scope="rack"
+            inherited={inheritedPhotoBlockers({ project, area: selectedArea, row: selectedRow })}
+            onPersist={async (type) => {
+              try {
+                const saved = await projects.updateRack(Number(pid), selectedRack.id, { ...selectedRack, ...restrictionFields(type) });
+                setRacks((items) => items.map((item) => (item.id === saved.id ? saved : item)));
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Could not save rack restriction");
+                throw err;
+              }
+            }}
+          />
+        )}
         {deviceMode === "ai" ? (
           pid ? (
             <AiImageParse

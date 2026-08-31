@@ -27,7 +27,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PromptDialog } from "../components/PromptDialog";
 import { ItemSelect, SelectMode, SelectModeToggle, SelectionToolbar } from "../components/SelectionBar";
 import AiImageParse, { EntryMode, EntryModeRadios } from "../components/AiImageParse";
-import RestrictionPicker from "../components/RestrictionPicker";
+import RestrictionPicker, { SavedRestrictionPicker } from "../components/RestrictionPicker";
 import { parseIdParam, projectHref, rackHref } from "../nav";
 import {
   photosAllowed,
@@ -98,7 +98,6 @@ export default function Project() {
   const [editingArea, setEditingArea] = useState<Area | null>(null);
   const [editingRow, setEditingRow] = useState<AisleRow | null>(null);
   const [editingRack, setEditingRack] = useState<Rack | null>(null);
-  const [areaRestriction, setAreaRestriction] = useState<RestrictionType>("");
   const [selectMode, setSelectMode] = useState<SelectMode>("one");
   const [selected, setSelected] = useState<number[]>([]);
   const [relocate, setRelocate] = useState<{ kind: RelocateKind; ids: number[]; mode: "copy" | "move" } | null>(null);
@@ -195,6 +194,28 @@ export default function Project() {
   function changeSelectMode(next: SelectMode) {
     setSelectMode(next);
     setSelected((ids) => (next === "one" ? ids.slice(0, 1) : ids));
+  }
+
+  async function persistRowRestriction(row: AisleRow, type: RestrictionType) {
+    try {
+      const saved = await projects.updateRow(pid, row.id, { ...row, ...restrictionFields(type) });
+      setAisleRows((rows) => rows.map((item) => (item.id === saved.id ? saved : item)));
+      setEditingRow((current) => (current?.id === saved.id ? saved : current));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save row restriction");
+      throw e;
+    }
+  }
+
+  async function persistRackRestriction(rack: Rack, type: RestrictionType) {
+    try {
+      const saved = await projects.updateRack(pid, rack.id, { ...rack, ...restrictionFields(type) });
+      setRacks((items) => items.map((item) => (item.id === saved.id ? saved : item)));
+      setEditingRack((current) => (current?.id === saved.id ? saved : current));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save rack restriction");
+      throw e;
+    }
   }
 
   async function onImported(_target: number, result: ImportResult) {
@@ -405,6 +426,8 @@ export default function Project() {
               noun="project"
               value={restrictionTypeOf(project)}
               onChange={(type) => setProject({ ...project, ...restrictionFields(type) })}
+              scope="project"
+              entityName={project.name}
             />
             <label className="field">
               <span>Restricted equipment notes</span>
@@ -438,15 +461,13 @@ export default function Project() {
           <form
             onSubmit={async (e) => {
               e.preventDefault();
-              await projects.addArea(pid, { name: areaName, ...restrictionFields(areaRestriction) });
+              await projects.addArea(pid, { name: areaName });
               setAreaName("");
-              setAreaRestriction("");
               load();
             }}
             style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
           >
             <input placeholder="Area / cage / hall" value={areaName} onChange={(e) => setAreaName(e.target.value)} required />
-            <RestrictionPicker name="new-area-restriction" noun="area" value={areaRestriction} onChange={setAreaRestriction} />
             <button className="btn primary">Add</button>
             {canImport && (
               <button type="button" className="btn" onClick={() => setImportOpen(true)}>
@@ -525,6 +546,9 @@ export default function Project() {
                       noun="area"
                       value={restrictionTypeOf(editingArea)}
                       onChange={(type) => setEditingArea({ ...editingArea, ...restrictionFields(type) })}
+                      inherited={inheritedPhotoBlockers({ project })}
+                      scope="area"
+                      entityName={editingArea.name}
                     />
                     <button className="btn primary">Save area</button>
                   </form>
@@ -543,7 +567,7 @@ export default function Project() {
           <EntryModeRadios name="entry-rows" value={rowMode} onChange={setRowMode} />
           <p className="muted">
             Rows sit between areas and racks. {currentArea ? `Showing ${currentArea.name}.` : "Filter by area, or add a set below."}{" "}
-            Tag government / EMSS on each row — it only applies to that row, not its neighbors. Click a row to open its racks.
+            Click a row to open its racks. Tag government / EMSS on a specific row — other rows stay open.
           </p>
           {currentArea && (
             <p>
@@ -676,12 +700,13 @@ export default function Project() {
                 Photos
               </button>
             </div>
-            <RestrictionPicker
+            <SavedRestrictionPicker
+              name={`row-restriction-${r.id}`}
+              entity={r}
+              scope="row"
               compact
-              noun="row"
-              name={`row-${r.id}-restriction`}
-              value={restrictionTypeOf(r)}
-              onChange={(type) => saveRowRestriction(r, type)}
+              inherited={inheritedPhotoBlockers({ project, area: parentArea })}
+              onPersist={(type) => persistRowRestriction(r, type)}
             />
             {editingRow?.id === r.id && (
               <form
@@ -718,8 +743,8 @@ export default function Project() {
           <EntryModeRadios name="entry-racks" value={rackMode} onChange={setRackMode} />
           <p className="muted">
             {currentRow
-              ? `Racks in ${currentRow.name}. Click a rack to open its elevation.`
-              : "Racks belong to a row. Open a row from the Rows tab, or filter below."}
+              ? `Racks in ${currentRow.name}. Click a rack to open its elevation. The switch above tags this row only.`
+              : "Racks belong to a row. Open a row from the Rows tab, or filter below. Tag government / EMSS on a specific rack."}
           </p>
           {currentRow && (
             <p>
@@ -727,6 +752,18 @@ export default function Project() {
                 ← {currentRow.name}
               </Link>
             </p>
+          )}
+          {currentRow && (
+            <SavedRestrictionPicker
+              name={`current-row-restriction-${currentRow.id}`}
+              entity={currentRow}
+              scope="row"
+              inherited={inheritedPhotoBlockers({
+                project,
+                area: areas.find((a) => a.id === currentRow.area_id) || null,
+              })}
+              onPersist={(type) => persistRowRestriction(currentRow, type)}
+            />
           )}
           <div className="row">
             <label className="field">
@@ -839,12 +876,13 @@ export default function Project() {
                 </Link>
               </div>
             </div>
-            <RestrictionPicker
+            <SavedRestrictionPicker
+              name={`rack-restriction-${r.id}`}
+              entity={r}
+              scope="rack"
               compact
-              noun="rack"
-              name={`rack-${r.id}-restriction`}
-              value={restrictionTypeOf(r)}
-              onChange={(type) => saveRackRestriction(r, type)}
+              inherited={inheritedPhotoBlockers({ project, area: parentArea, row: parentRow })}
+              onPersist={(type) => persistRackRestriction(r, type)}
             />
             {editingRack?.id === r.id && (
               <form

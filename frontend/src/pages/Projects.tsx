@@ -105,6 +105,8 @@ export default function Projects() {
             noun="project"
             value={restrictionTypeOf(form)}
             onChange={(type: RestrictionType) => setForm({ ...form, ...restrictionFields(type) })}
+            scope="project"
+            entityName={form.name}
           />
           <label className="field"><span>Restricted equipment notes</span><textarea value={form.restricted_equipment_notes} onChange={(e) => set("restricted_equipment_notes", e.target.value)} /></label>
           <div className="row three">

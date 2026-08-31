@@ -792,6 +792,8 @@ export function DeviceFields({
         value={restrictionTypeOf({ restricted: value.restricted, restricted_reason: value.restricted_reason })}
         onChange={(type) => set(deviceRestrictionFields(type))}
         inherited={inherited}
+        scope="device"
+        entityName={value.name}
       />
       <label className="check-row">
         <input
