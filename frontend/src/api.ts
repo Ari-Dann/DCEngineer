@@ -446,6 +446,8 @@ export type VisionProposal = {
   prompt_text: string;
   extractor_model: string;
   raw_extraction?: unknown;
+  confirmed_fields?: string[];
+  skipped_fields?: string[];
   accepted_device_id?: number | null;
   reviewed_by?: number | null;
   reviewed_at?: string | null;
@@ -465,6 +467,7 @@ export type VisionSession = {
   restricted_blocked: boolean;
   error_detail: string;
   layout?: unknown;
+  layout_review?: Record<string, Record<string, { fields?: Record<string, string>; id?: number }>>;
   restriction_reasons: string[];
   created_by?: number | null;
   claimed_by?: number | null;
@@ -532,6 +535,29 @@ export const vision = {
     api<LayoutAcceptResult>(`/api/vision/sessions/${sessionId}/layout/accept`, {
       method: "POST",
       body: JSON.stringify(body || {}),
+    }),
+  confirmField: (sessionId: number, proposalId: number, field: string, value?: unknown) =>
+    api<VisionProposal>(`/api/vision/sessions/${sessionId}/proposals/${proposalId}/fields/${encodeURIComponent(field)}/confirm`, {
+      method: "POST",
+      body: JSON.stringify({ value: value ?? null }),
+    }),
+  skipField: (sessionId: number, proposalId: number, field: string) =>
+    api<VisionProposal>(
+      `/api/vision/sessions/${sessionId}/proposals/${proposalId}/fields/${encodeURIComponent(field)}/skip`,
+      { method: "POST" },
+    ),
+  confirmLayoutField: (
+    sessionId: number,
+    body: { kind: "area" | "row" | "rack"; index: number; field: string; value?: unknown },
+  ) =>
+    api<{ ok: boolean; session: VisionSession }>(`/api/vision/sessions/${sessionId}/layout/fields/confirm`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  skipLayoutField: (sessionId: number, body: { kind: "area" | "row" | "rack"; index: number; field: string }) =>
+    api<{ ok: boolean; session: VisionSession }>(`/api/vision/sessions/${sessionId}/layout/fields/skip`, {
+      method: "POST",
+      body: JSON.stringify(body),
     }),
 };
 

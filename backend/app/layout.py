@@ -152,6 +152,38 @@ def resolve_or_create_row(
     return row
 
 
+def resolve_or_create_area(db: Session, project_id: int, name: str) -> tuple[Area, bool]:
+    label = (name or "").strip()
+    if not label:
+        raise HTTPException(400, "Area name is required")
+    area = (
+        db.query(Area)
+        .filter(Area.project_id == project_id, Area.name == label)
+        .order_by(Area.id)
+        .first()
+    )
+    if area:
+        return area, False
+    area = Area(project_id=project_id, name=label)
+    db.add(area)
+    db.flush()
+    return area, True
+
+
+def layout_items(layout: Any, kind: str) -> list[dict[str, Any]]:
+    if not isinstance(layout, dict):
+        return []
+    key = {"area": "areas", "row": "rows", "rack": "racks"}.get(kind, "")
+    raw = layout.get(key) or []
+    out: list[dict[str, Any]] = []
+    for item in raw:
+        if isinstance(item, str) and item.strip():
+            out.append({"name": item.strip()})
+        elif isinstance(item, dict):
+            out.append(item)
+    return out
+
+
 def apply_row_to_rack(rack: Rack, row: AisleRow | None, area_id: int | None = None) -> None:
     if row:
         rack.row_id = row.id

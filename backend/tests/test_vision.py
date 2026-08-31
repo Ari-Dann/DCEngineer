@@ -391,6 +391,126 @@ def test_vision_layout_accept_requires_area_and_names(client, auth):
     assert [r["name"] for r in created.json()["created"]] == ["B01", "B02"]
 
 
+def test_proposal_fields_confirm_independently(client, auth):
+    sidecar = _sidecar(client, auth, "vision-sidecar-fields")
+    project = _project(client, auth, "Field Confirm")
+    area = _area(client, auth, project["id"])
+    session = _session(client, auth, project["id"], area_id=area["id"], shot_kind="device_close")
+    _clip(client, auth, session["id"])
+    client.post(f"/api/vision/sessions/{session['id']}/analyze", headers=auth)
+    created = client.post(
+        f"/api/vision/sessions/{session['id']}/proposals",
+        headers=sidecar,
+        json={
+            "model": "claude-test",
+            "prompt_text": "fields",
+            "raw_extraction": {"devices": [{"name": "sw-1", "vendor": "Cisco", "serial": "ABC"}]},
+            "proposals": [{"name": "sw-1", "vendor": "Cisco", "serial": "ABC", "model": "C9300"}],
+        },
+    )
+    pid = created.json()[0]["id"]
+    serial = client.post(
+        f"/api/vision/sessions/{session['id']}/proposals/{pid}/fields/serial/confirm",
+        headers=auth,
+        json={"value": "ABC"},
+    )
+    assert serial.status_code == 200, serial.text
+    assert "serial" in serial.json()["confirmed_fields"]
+    devices = client.get(f"/api/projects/{project['id']}/devices", headers=auth).json()
+    assert devices == []
+    name = client.post(
+        f"/api/vision/sessions/{session['id']}/proposals/{pid}/fields/name/confirm",
+        headers=auth,
+        json={"value": "sw-1"},
+    )
+    assert name.status_code == 200, name.text
+    devices = client.get(f"/api/projects/{project['id']}/devices", headers=auth).json()
+    assert len(devices) == 1
+    assert devices[0]["name"] == "sw-1"
+    assert devices[0]["serial"] == "ABC"
+    assert devices[0]["vendor"] == ""
+    vendor = client.post(
+        f"/api/vision/sessions/{session['id']}/proposals/{pid}/fields/vendor/confirm",
+        headers=auth,
+        json={},
+    )
+    assert vendor.status_code == 200
+    devices = client.get(f"/api/projects/{project['id']}/devices", headers=auth).json()
+    assert devices[0]["vendor"] == "Cisco"
+    skipped = client.post(
+        f"/api/vision/sessions/{session['id']}/proposals/{pid}/fields/model/skip",
+        headers=auth,
+    )
+    assert skipped.status_code == 200
+    assert "model" in skipped.json()["skipped_fields"]
+    devices = client.get(f"/api/projects/{project['id']}/devices", headers=auth).json()
+    assert devices[0]["model"] == ""
+    sidecar_denied = client.post(
+        f"/api/vision/sessions/{session['id']}/proposals/{pid}/fields/owner/confirm",
+        headers=sidecar,
+        json={"value": "nope"},
+    )
+    assert sidecar_denied.status_code == 403
+
+
+def test_layout_fields_confirm_independently(client, auth):
+    sidecar = _sidecar(client, auth, "vision-sidecar-layout-fields")
+    project = _project(client, auth, "Layout Fields")
+    session = _session(client, auth, project["id"], shot_kind="aisle_wide")
+    _clip(client, auth, session["id"], kind="aisle_wide")
+    client.post(f"/api/vision/sessions/{session['id']}/analyze", headers=auth)
+    client.post(
+        f"/api/vision/sessions/{session['id']}/proposals",
+        headers=sidecar,
+        json={
+            "model": "claude-test",
+            "prompt_text": "layout",
+            "raw_extraction": {},
+            "layout": {
+                "areas": [{"name": "Hall B", "notes": "west"}],
+                "rows": [{"name": "B01", "area_name": "Hall B"}],
+                "racks": [{"name": "B01-01", "row_name": "B01"}],
+            },
+            "proposals": [],
+        },
+    )
+    notes = client.post(
+        f"/api/vision/sessions/{session['id']}/layout/fields/confirm",
+        headers=auth,
+        json={"kind": "area", "index": 0, "field": "notes"},
+    )
+    assert notes.status_code == 200, notes.text
+    areas = client.get(f"/api/projects/{project['id']}/areas", headers=auth).json()
+    assert areas == []
+    area = client.post(
+        f"/api/vision/sessions/{session['id']}/layout/fields/confirm",
+        headers=auth,
+        json={"kind": "area", "index": 0, "field": "name"},
+    )
+    assert area.status_code == 200, area.text
+    areas = client.get(f"/api/projects/{project['id']}/areas", headers=auth).json()
+    assert [a["name"] for a in areas] == ["Hall B"]
+    assert areas[0]["description"] == "west"
+    row = client.post(
+        f"/api/vision/sessions/{session['id']}/layout/fields/confirm",
+        headers=auth,
+        json={"kind": "row", "index": 0, "field": "name"},
+    )
+    assert row.status_code == 200, row.text
+    rows = client.get(f"/api/projects/{project['id']}/rows", headers=auth).json()
+    assert [r["name"] for r in rows] == ["B01"]
+    skip_rack = client.post(
+        f"/api/vision/sessions/{session['id']}/layout/fields/skip",
+        headers=auth,
+        json={"kind": "rack", "index": 0, "field": "name"},
+    )
+    assert skip_rack.status_code == 200
+    racks = client.get(f"/api/projects/{project['id']}/racks", headers=auth).json()
+    assert racks == []
+    devices = client.get(f"/api/projects/{project['id']}/devices", headers=auth).json()
+    assert devices == []
+
+
 def test_restriction_reasons_from_area(client, auth):
     project = _project(client, auth, "Policy")
     area = _area(client, auth, project["id"], name="EMSS", restricted=True)

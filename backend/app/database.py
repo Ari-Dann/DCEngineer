@@ -83,3 +83,15 @@ def _ensure_columns() -> None:
                 conn.execute(text("ALTER TABLE devices ADD COLUMN pdu_b_id INTEGER"))
             if "owner" not in dcols:
                 conn.execute(text("ALTER TABLE devices ADD COLUMN owner VARCHAR(255) DEFAULT ''"))
+    if "vision_sessions" in tables:
+        scols = {c["name"] for c in inspector.get_columns("vision_sessions")}
+        if "layout_review_json" not in scols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE vision_sessions ADD COLUMN layout_review_json TEXT DEFAULT ''"))
+    if "vision_proposals" in tables:
+        pcols = {c["name"] for c in inspector.get_columns("vision_proposals")}
+        with engine.begin() as conn:
+            if "confirmed_fields_json" not in pcols:
+                conn.execute(text("ALTER TABLE vision_proposals ADD COLUMN confirmed_fields_json TEXT DEFAULT '[]'"))
+            if "skipped_fields_json" not in pcols:
+                conn.execute(text("ALTER TABLE vision_proposals ADD COLUMN skipped_fields_json TEXT DEFAULT '[]'"))

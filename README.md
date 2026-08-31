@@ -250,7 +250,7 @@ Only an **Admin** can rename or delete an entire project.
 
 ### Vision sidecar (optional)
 
-On Capture, create a **set of rows** under an area by typing names (one per line) or by capturing a wide aisle **photo / video**. Vision assist also records closer rack and serial shots. Media is stored on a vision session. Analyze queues a job for `sidecar/`, which authenticates with JWT, downloads attachments, extracts relevant video frames with ffmpeg, and calls a vision model with a JSON schema. Unreadable fields are stored blank (never guessed). Suggested aisle names and device proposals stay staging until an engineer creates the rows or accepts, edits, or rejects a device. Accepting a device copies evidence photos onto the new record and keeps the originals on the session. Prompt, model, and raw extraction sit on each proposal for audit.
+On the **Areas**, **Rows**, **Racks**, and **Devices** tabs (and Capture / a rack elevation), choose **AI image parse** to photograph or record video in place. The sidecar returns suggestions; **each field is Confirm / Skip on its own**. Confirming a name writes that area, row, rack, or device; later field confirms patch the same record. Unreadable fields stay blank. Restricted media is never sent to the model.
 
 If an area is restricted, photography is forbidden, or a clip is marked photography-restricted, Analyze **refuses** and the sidecar never sends image bytes to the model.
 

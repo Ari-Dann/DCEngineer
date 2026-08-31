@@ -3,7 +3,7 @@ import { AisleRow, Area, Device, PDU, Project, Rack, enqueue, layoutPath, projec
 import { DeviceEditorModal, DeviceFields, emptyDraft, payloadFromDraft } from "../components/DeviceEditor";
 import CreateRowsPanel from "../components/CreateRowsPanel";
 import LocatePanel from "../components/LocatePanel";
-import VisionAssist from "../components/VisionAssist";
+import AiImageParse, { EntryMode, EntryModeRadios } from "../components/AiImageParse";
 import type { DeviceDraft } from "../components/DeviceEditor";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { learnCatalog } from "../catalog";
@@ -27,6 +27,7 @@ export default function Capture() {
   const [pendingDelete, setPendingDelete] = useState<Device | null>(null);
   const [busy, setBusy] = useState(false);
   const [catalogNonce, setCatalogNonce] = useState(0);
+  const [deviceMode, setDeviceMode] = useState<EntryMode>("manual");
 
   useEffect(() => {
     projects.list().then((rows) => {
@@ -196,6 +197,7 @@ export default function Capture() {
       )}
 
       <form className="card" onSubmit={onSubmit} style={{ marginTop: 16 }}>
+        <EntryModeRadios name="entry-capture-device" value={deviceMode} onChange={setDeviceMode} />
         <div className="row">
           <label className="field">
             <span>Row</span>
@@ -226,7 +228,23 @@ export default function Capture() {
             </select>
           </label>
         </div>
-        <DeviceFields
+        {deviceMode === "ai" ? (
+          pid ? (
+            <AiImageParse
+              projectId={Number(pid)}
+              target="device"
+              areaId={areaId}
+              rowId={rowId}
+              rackId={rid}
+              areas={areas}
+              onInventoryChanged={loadDevices}
+            />
+          ) : (
+            <p className="muted">Select a project first.</p>
+          )
+        ) : (
+          <>
+            <DeviceFields
           value={draft}
           onChange={setDraft}
           racks={racks}
@@ -239,23 +257,13 @@ export default function Capture() {
           pendingPhotos={photos}
           onPendingPhotos={setPhotos}
           catalogNonce={catalogNonce}
-        />
-        <button className="btn primary block" disabled={busy}>
-          {busy ? "Saving…" : "Save & next"}
-        </button>
+            />
+            <button className="btn primary block" disabled={busy}>
+              {busy ? "Saving…" : "Save & next"}
+            </button>
+          </>
+        )}
       </form>
-
-      {pid && (
-        <VisionAssist
-          projectId={Number(pid)}
-          areaId={areaId}
-          rowId={rowId}
-          rackId={rid}
-          areas={areas}
-          rows={aisleRows}
-          racks={racks}
-        />
-      )}
 
       {pid && (
         <div style={{ marginTop: 16 }}>
