@@ -124,6 +124,15 @@ p { margin: 0 0 0.75rem; color: var(--muted); }
 @media (max-width: 700px) { .row, .row.three { grid-template-columns: 1fr; } }
 
 .tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 12px; }
+.tabs-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 6px; }
+.tabs-label + .tabs { margin-bottom: 10px; }
+.layout-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+@media (max-width: 700px) { .layout-stats { grid-template-columns: 1fr 1fr; } }
+.layout-stat {
+  display: block; text-align: left; padding: 12px 14px; border-radius: 12px;
+  border: 1px solid var(--border); background: var(--bg-elev); color: inherit; cursor: pointer;
+}
+.layout-stat strong { display: block; font-size: 1.35rem; }
 .tab {
   white-space: nowrap; padding: 8px 12px; border-radius: 999px;
   border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer;

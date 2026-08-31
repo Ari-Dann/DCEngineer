@@ -31,7 +31,7 @@ from app.models import (
 )
 from app.catalog import learn_values
 from app.importer import import_devices, preview_import
-from app.layout import apply_relocate, apply_row_to_rack, backfill_rows, resolve_or_create_row
+from app.layout import apply_relocate, apply_row_to_rack, backfill_rows, bulk_create_rows, resolve_or_create_row, unique_labels
 from app.rbi_export import eol_status
 from app.schemas import (
     AreaIn,
@@ -63,6 +63,8 @@ from app.schemas import (
     RackIn,
     RackOut,
     RelocateIn,
+    RowBulkIn,
+    RowBulkOut,
     RowIn,
     RowOut,
     WorkOrderIn,
@@ -296,6 +298,20 @@ def create_row(project_id: int, body: RowIn, db: Session = Depends(get_db), _: U
     db.commit()
     db.refresh(row)
     return row
+
+
+@projects_router.post("/{project_id}/rows/bulk", response_model=RowBulkOut, status_code=201)
+def create_rows_bulk(project_id: int, body: RowBulkIn, db: Session = Depends(get_db), _: User = Depends(WriteUser)):
+    _get_project(db, project_id)
+    _get_area(db, project_id, body.area_id)
+    labels = unique_labels(body.names)
+    if not labels:
+        raise HTTPException(400, "Enter at least one row name")
+    created, existing = bulk_create_rows(db, project_id, body.area_id, labels)
+    db.commit()
+    for row in created + existing:
+        db.refresh(row)
+    return RowBulkOut(created=created, existing=existing)
 
 
 @projects_router.patch("/{project_id}/rows/{row_id}", response_model=RowOut)

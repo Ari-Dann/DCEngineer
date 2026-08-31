@@ -30,6 +30,20 @@ import { parseIdParam, projectHref, rackHref } from "../nav";
 
 const TABS = ["overview", "areas", "rows", "racks", "devices", "locate", "cables", "checklists", "handoffs", "lifecycle"] as const;
 type Tab = (typeof TABS)[number];
+const LAYOUT_TABS: Tab[] = ["areas", "rows", "racks", "devices"];
+const OTHER_TABS: Tab[] = ["overview", "locate", "cables", "checklists", "handoffs", "lifecycle"];
+const TAB_LABELS: Record<Tab, string> = {
+  overview: "Overview",
+  areas: "Areas",
+  rows: "Rows",
+  racks: "Racks",
+  devices: "Devices",
+  locate: "Locate",
+  cables: "Cables",
+  checklists: "Checklists",
+  handoffs: "Handoffs",
+  lifecycle: "Lifecycle",
+};
 
 export default function Project() {
   const { id } = useParams();
@@ -55,6 +69,8 @@ export default function Project() {
   const [error, setError] = useState("");
   const [areaName, setAreaName] = useState("");
   const [rowName, setRowName] = useState("");
+  const [rowAreaId, setRowAreaId] = useState<number | "">("");
+  const [rowBulk, setRowBulk] = useState("");
   const [rackName, setRackName] = useState("");
   const [rackHeight, setRackHeight] = useState(42);
   const [deviceArea, setDeviceArea] = useState<number | "">("");
@@ -116,6 +132,10 @@ export default function Project() {
   useEffect(() => {
     load();
   }, [pid]);
+
+  useEffect(() => {
+    setRowAreaId(areaFilter || "");
+  }, [areaFilter]);
 
   async function saveProject(e: FormEvent) {
     e.preventDefault();
@@ -285,16 +305,40 @@ export default function Project() {
       </div>
       {error && <div className="error">{error}</div>}
       {importMsg && <div className="success">{importMsg}</div>}
+      <p className="tabs-label">Layout</p>
       <div className="tabs">
-        {TABS.map((t) => (
+        {LAYOUT_TABS.map((t) => (
           <button key={t} className={`tab ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>
-            {t}
+            {TAB_LABELS[t]}
+          </button>
+        ))}
+      </div>
+      <p className="tabs-label">Project</p>
+      <div className="tabs">
+        {OTHER_TABS.map((t) => (
+          <button key={t} className={`tab ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>
+            {TAB_LABELS[t]}
           </button>
         ))}
       </div>
 
       {tab === "overview" && (
         <>
+          <div className="layout-stats">
+            {(
+              [
+                ["areas", "Areas", areas.length],
+                ["rows", "Rows", aisleRows.length],
+                ["racks", "Racks", racks.length],
+                ["devices", "Devices", devices.length],
+              ] as const
+            ).map(([next, label, count]) => (
+              <button key={next} type="button" className="layout-stat" onClick={() => setTab(next)}>
+                <strong>{count}</strong>
+                <span className="muted">{label}</span>
+              </button>
+            ))}
+          </div>
           <form className="card" onSubmit={saveProject}>
             {isAdmin && (
               <label className="field">
@@ -462,7 +506,9 @@ export default function Project() {
       {tab === "rows" && (
         <div className="card">
           <p className="muted">
-            {currentArea ? `Rows in ${currentArea.name}. Click a row to open its racks.` : "Click a row to open its racks. Filter by area, or start from the Areas tab."}
+            Rows sit between areas and racks. {currentArea ? `Showing ${currentArea.name}.` : "Filter by area, or add a set below."}{" "}
+            Click a row to open its racks.{" "}
+            <Link to="/capture">Create from photos / video on Capture</Link>
           </p>
           {currentArea && (
             <p>
@@ -470,7 +516,7 @@ export default function Project() {
             </p>
           )}
           <label className="field">
-            <span>Area</span>
+            <span>Filter by area</span>
             <select
               value={areaFilter}
               onChange={(e) => setHierarchy({ tab: "rows", area: e.target.value ? Number(e.target.value) : "", row: "" })}
@@ -486,17 +532,49 @@ export default function Project() {
           <form
             onSubmit={async (e) => {
               e.preventDefault();
-              await projects.addRow(pid, { name: rowName, area_id: areaFilter || null });
+              const targetArea = rowAreaId || areaFilter;
+              if (!targetArea) {
+                setError("Select an area before creating rows.");
+                return;
+              }
+              const names = [rowName, ...rowBulk.split(/[\n,;]+/)].map((s) => s.trim()).filter(Boolean);
+              if (!names.length) {
+                setError("Enter at least one row name.");
+                return;
+              }
+              setError("");
+              await projects.addRows(pid, { area_id: Number(targetArea), names });
               setRowName("");
+              setRowBulk("");
               load();
             }}
-            style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+            style={{ display: "grid", gap: 8 }}
           >
-            <input placeholder="Row / aisle" value={rowName} onChange={(e) => setRowName(e.target.value)} required />
-            <button className="btn primary" disabled={!areaFilter}>
-              Add under area
+            <label className="field">
+              <span>Create under area</span>
+              <select value={rowAreaId} onChange={(e) => setRowAreaId(e.target.value ? Number(e.target.value) : "")}>
+                <option value="">Select an area</option>
+                {areas.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <input placeholder="One row name, or leave blank and paste a list" value={rowName} onChange={(e) => setRowName(e.target.value)} />
+            <label className="field">
+              <span>Or a set of rows (one per line)</span>
+              <textarea value={rowBulk} onChange={(e) => setRowBulk(e.target.value)} placeholder={"A01\nA02\nA03"} rows={4} />
+            </label>
+            <button className="btn primary" disabled={!rowAreaId && !areaFilter}>
+              Create rows
             </button>
           </form>
+          {rowsForArea.length === 0 && (
+            <p className="muted" style={{ marginTop: 12 }}>
+              No rows yet. Add them here or capture a wide aisle shot on Capture and create the suggested names.
+            </p>
+          )}
           <SelectModeToggle mode={selectMode} onChange={changeSelectMode} />
           <SelectionToolbar
             noun="row"

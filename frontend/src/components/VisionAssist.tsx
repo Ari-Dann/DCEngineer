@@ -1,6 +1,17 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Area, AisleRow, Rack, VisionClipKind, VisionSession, VisionShotKind, layoutPath, uploadVisionClip, vision } from "../api";
+import {
+  Area,
+  AisleRow,
+  LayoutAcceptResult,
+  Rack,
+  VisionClipKind,
+  VisionSession,
+  VisionShotKind,
+  layoutPath,
+  uploadVisionClip,
+  vision,
+} from "../api";
 import CameraModal from "./CameraModal";
 import VideoRecorder from "./VideoRecorder";
 
@@ -16,6 +27,11 @@ function clipKindFor(shot: VisionShotKind): VisionClipKind {
   return shot;
 }
 
+function suggestedRowNames(session?: VisionSession | null) {
+  const rows = session?.layout && typeof session.layout === "object" ? (session.layout as { rows?: { name?: string }[] }).rows : [];
+  return (rows || []).map((r) => (r?.name || "").trim()).filter(Boolean);
+}
+
 type Props = {
   projectId: number;
   areaId: number | "";
@@ -24,11 +40,25 @@ type Props = {
   areas: Area[];
   rows: AisleRow[];
   racks: Rack[];
+  purpose?: "layout" | "inventory";
+  embedded?: boolean;
+  onLayoutAccepted?: (result: LayoutAcceptResult) => void;
 };
 
-export default function VisionAssist({ projectId, areaId, rowId, rackId, areas, rows, racks }: Props) {
+export default function VisionAssist({
+  projectId,
+  areaId,
+  rowId,
+  rackId,
+  areas,
+  rows,
+  racks,
+  purpose = "inventory",
+  embedded = false,
+  onLayoutAccepted,
+}: Props) {
   const [sessions, setSessions] = useState<VisionSession[]>([]);
-  const [shotKind, setShotKind] = useState<VisionShotKind>("mixed");
+  const [shotKind, setShotKind] = useState<VisionShotKind>(purpose === "layout" ? "aisle_wide" : "mixed");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
@@ -38,6 +68,7 @@ export default function VisionAssist({ projectId, areaId, rowId, rackId, areas, 
 
   const selectedArea = areaId ? areas.find((a) => a.id === areaId) : undefined;
   const blockedHere = Boolean(selectedArea && (selectedArea.restricted || !selectedArea.photography_allowed));
+  const layoutMode = purpose === "layout";
 
   async function reload() {
     setSessions(await vision.sessions(projectId));
@@ -91,7 +122,11 @@ export default function VisionAssist({ projectId, areaId, rowId, rackId, areas, 
       if (next.restricted_blocked) {
         setError(next.error_detail || "Restricted equipment — photos were not sent.");
       } else if (next.status === "queued") {
-        setMsg("Queued for the vision sidecar. Proposals will appear here for review — nothing is written as a device yet.");
+        setMsg(
+          layoutMode
+            ? "Queued for the vision sidecar. Suggested row names stay staging until you create them."
+            : "Queued for the vision sidecar. Proposals will appear here for review — nothing is written as a device yet.",
+        );
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Analyze failed");
@@ -100,15 +135,46 @@ export default function VisionAssist({ projectId, areaId, rowId, rackId, areas, 
     }
   }
 
-  const active = sessions.find((s) => s.id === activeId);
+  async function createSuggestedRows(session: VisionSession) {
+    setError("");
+    setMsg("");
+    if (!areaId && !session.area_id) {
+      setError("Select an area first. Rows sit under an area.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await vision.acceptLayout(session.id, {
+        area_id: areaId || session.area_id || undefined,
+      });
+      onLayoutAccepted?.(result);
+      const created = result.created.map((r) => r.name).join(", ");
+      const existing = result.existing.map((r) => r.name).join(", ");
+      setMsg(
+        [created ? `Created rows ${created}` : "", existing ? `Already present: ${existing}` : ""]
+          .filter(Boolean)
+          .join(". ") || "No new rows.",
+      );
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create rows");
+    } finally {
+      setBusy(false);
+    }
+  }
 
-  return (
-    <div className="card" style={{ marginTop: 16 }}>
-      <h3>Vision assist</h3>
+  const active = sessions.find((s) => s.id === activeId);
+  const inner = (
+    <>
+      {!embedded && <h3>{layoutMode ? "Capture rows from photos / video" : "Vision assist"}</h3>}
       <p>
-        Capture a wide aisle clip, then closer rack and serial shots. The sidecar proposes fields; you accept, edit, or
-        reject. Unreadable text stays blank. Original media stays on the session as evidence.
+        {layoutMode
+          ? "Wide aisle photo or video. The sidecar suggests row names; you create that set after review. Nothing is written until you confirm."
+          : "Capture a wide aisle clip, then closer rack and serial shots. The sidecar proposes fields; you accept, edit, or reject. Unreadable text stays blank. Original media stays on the session as evidence."}
       </p>
+      {layoutMode && !areaId && (
+        <p className="muted">Select an area above so suggested rows are created in the right place.</p>
+      )}
       {blockedHere && (
         <div className="banner">
           This area is restricted or forbids photography. You can still keep evidence on the session, but Analyze will
@@ -171,9 +237,10 @@ export default function VisionAssist({ projectId, areaId, rowId, rackId, areas, 
         {sessions.length === 0 && <p className="muted">No vision sessions for this project yet.</p>}
         {sessions.slice(0, 8).map((s) => {
           const rack = racks.find((r) => r.id === s.rack_id);
+          const names = suggestedRowNames(s);
           return (
-            <Link key={s.id} className="list-item clickable" to={`/capture/vision/${s.id}`} style={{ textDecoration: "none" }}>
-              <div>
+            <div key={s.id} className="list-item" style={{ flexWrap: "wrap" }}>
+              <Link className="list-main" to={`/capture/vision/${s.id}`} style={{ textDecoration: "none" }}>
                 <strong>
                   #{s.id} · {s.shot_kind.replace("_", " ")}
                 </strong>
@@ -181,11 +248,16 @@ export default function VisionAssist({ projectId, areaId, rowId, rackId, areas, 
                   {s.status}
                   {s.pending_count ? ` · ${s.pending_count} to review` : ""}
                   {rack ? ` · ${layoutPath(rack, rows, areas)}` : ""}
+                  {names.length ? ` · rows ${names.join(", ")}` : ""}
                   {s.restricted_blocked ? " · blocked" : ""}
                 </div>
-              </div>
-              <span className="muted">{s.clip_count} clips</span>
-            </Link>
+              </Link>
+              {names.length > 0 && (
+                <button type="button" className="btn" disabled={busy} onClick={() => createSuggestedRows(s)}>
+                  Create these rows
+                </button>
+              )}
+            </div>
           );
         })}
       </div>
@@ -197,6 +269,13 @@ export default function VisionAssist({ projectId, areaId, rowId, rackId, areas, 
           hint={SHOTS.find((s) => s.id === shotKind)?.help}
         />
       )}
+    </>
+  );
+
+  if (embedded) return <div>{inner}</div>;
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      {inner}
     </div>
   );
 }

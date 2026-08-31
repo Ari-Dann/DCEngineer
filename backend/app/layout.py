@@ -1,6 +1,6 @@
 """Area → row → rack layout helpers: resolve, backfill, copy, and move."""
 
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -9,6 +9,116 @@ from app.models import AisleRow, Area, Device, Rack
 from app.schemas import RelocateIn
 
 _SKIP_CLONE = {"id"}
+
+
+def unique_labels(values: list[str] | None) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in values or []:
+        label = (raw or "").strip()
+        if not label:
+            continue
+        key = label.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(label)
+    return out
+
+
+def names_from_layout(layout: Any) -> list[str]:
+    if not isinstance(layout, dict):
+        return []
+    names: list[str] = []
+    for item in layout.get("rows") or []:
+        if isinstance(item, str):
+            names.append(item)
+        elif isinstance(item, dict):
+            names.append(str(item.get("name") or ""))
+    for item in layout.get("racks") or []:
+        if isinstance(item, dict):
+            names.append(str(item.get("row_name") or ""))
+    return unique_labels(names)
+
+
+def racks_from_layout(layout: Any) -> list[dict[str, Any]]:
+    if not isinstance(layout, dict):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in layout.get("racks") or []:
+        if isinstance(item, str) and item.strip():
+            out.append({"name": item.strip()})
+        elif isinstance(item, dict) and str(item.get("name") or "").strip():
+            out.append(item)
+    return out
+
+
+def bulk_create_rows(
+    db: Session,
+    project_id: int,
+    area_id: int,
+    names: list[str],
+) -> tuple[list[AisleRow], list[AisleRow]]:
+    created: list[AisleRow] = []
+    existing: list[AisleRow] = []
+    for label in unique_labels(names):
+        row = (
+            db.query(AisleRow)
+            .filter(AisleRow.project_id == project_id, AisleRow.name == label, AisleRow.area_id == area_id)
+            .order_by(AisleRow.id)
+            .first()
+        )
+        if row:
+            existing.append(row)
+            continue
+        unassigned = (
+            db.query(AisleRow)
+            .filter(AisleRow.project_id == project_id, AisleRow.name == label, AisleRow.area_id.is_(None))
+            .order_by(AisleRow.id)
+            .first()
+        )
+        if unassigned:
+            unassigned.area_id = area_id
+            existing.append(unassigned)
+            continue
+        row = AisleRow(project_id=project_id, area_id=area_id, name=label)
+        db.add(row)
+        db.flush()
+        created.append(row)
+    return created, existing
+
+
+def resolve_or_create_rack(
+    db: Session,
+    project_id: int,
+    name: str,
+    row: AisleRow | None = None,
+    area_id: int | None = None,
+    ru_height: int | None = None,
+) -> tuple[Rack, bool]:
+    label = (name or "").strip()
+    if not label:
+        raise HTTPException(400, "Rack name is required")
+    q = db.query(Rack).filter(Rack.project_id == project_id, Rack.name == label)
+    if row:
+        q = q.filter((Rack.row_id == row.id) | (Rack.row_id.is_(None)))
+    rack = q.order_by(Rack.id).first()
+    if rack:
+        if row:
+            apply_row_to_rack(rack, row, area_id)
+        return rack, False
+    height = ru_height if ru_height and 1 <= int(ru_height) <= 70 else 42
+    rack = Rack(
+        project_id=project_id,
+        name=label,
+        area_id=row.area_id if row and row.area_id is not None else area_id,
+        row_id=row.id if row else None,
+        row_label=row.name if row else "",
+        ru_height=height,
+    )
+    db.add(rack)
+    db.flush()
+    return rack, True
 
 
 def resolve_or_create_row(
