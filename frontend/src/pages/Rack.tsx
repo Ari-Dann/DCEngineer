@@ -93,9 +93,8 @@ export default function RackPage() {
   const backRowName = aisleRows.find((r) => r.id === backRow)?.name || elev.rack.row_label || "row";
   const backHref = projectHref(pid, { tab: backRow ? "racks" : "rows", area: backArea, row: backRow });
   const parentRow = aisleRows.find((r) => r.id === elev.rack.row_id);
-  const parentArea = areas.find((a) => a.id === (elev.rack.area_id || parentRow?.area_id));
-  const rackInherited = inheritedPhotoBlockers({ project, area: parentArea, row: parentRow });
-  const rackPhotosOk = photosAllowed({ project, area: parentArea, row: parentRow, rack: elev.rack });
+  const rackInherited = inheritedPhotoBlockers({ project, row: parentRow });
+  const rackPhotosOk = photosAllowed({ project, row: parentRow, rack: elev.rack });
 
   return (
     <div className="page">
@@ -175,6 +174,7 @@ export default function RackPage() {
             <RackHeightField value={height} onChange={setHeight} />
             <RestrictionPicker
               name="rack-page-restriction"
+              noun="rack"
               value={restrictionTypeOf(elev.rack)}
               onChange={async (type) => {
                 const next = { ...elev.rack, ...restrictionFields(type) };

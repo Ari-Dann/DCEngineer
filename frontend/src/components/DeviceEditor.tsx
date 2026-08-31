@@ -338,10 +338,9 @@ export function DeviceFields({
   const selectedRack = racks.find((r) => r.id === value.rack_id);
   const selectedRow = rows.find((r) => r.id === selectedRack?.row_id);
   const selectedArea = areas.find((a) => a.id === (selectedRack?.area_id || selectedRow?.area_id));
-  const inherited = inheritedPhotoBlockers({ project, area: selectedArea, row: selectedRow, rack: selectedRack });
+  const inherited = inheritedPhotoBlockers({ project, row: selectedRow, rack: selectedRack });
   const photosOk = photosAllowed({
     project,
-    area: selectedArea,
     row: selectedRow,
     rack: selectedRack,
     device: { restricted: value.restricted, restricted_reason: value.restricted_reason },
@@ -789,6 +788,7 @@ export function DeviceFields({
       )}
       <RestrictionPicker
         name="device-restriction"
+        noun="device"
         value={restrictionTypeOf({ restricted: value.restricted, restricted_reason: value.restricted_reason })}
         onChange={(type) => set(deviceRestrictionFields(type))}
         inherited={inherited}

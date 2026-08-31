@@ -30,7 +30,6 @@ import AiImageParse, { EntryMode, EntryModeRadios } from "../components/AiImageP
 import RestrictionPicker, { SavedRestrictionPicker } from "../components/RestrictionPicker";
 import { parseIdParam, projectHref, rackHref } from "../nav";
 import {
-  inheritedPhotoBlockers,
   photosAllowed,
   restrictionCaption,
   restrictionFields,
@@ -156,6 +155,16 @@ export default function Project() {
     e.preventDefault();
     if (!project) return;
     await projects.update(pid, project);
+    load();
+  }
+
+  async function saveRowRestriction(row: AisleRow, type: RestrictionType) {
+    await projects.updateRow(pid, row.id, { ...row, ...restrictionFields(type) });
+    load();
+  }
+
+  async function saveRackRestriction(rack: Rack, type: RestrictionType) {
+    await projects.updateRack(pid, rack.id, { ...rack, ...restrictionFields(type) });
     load();
   }
 
@@ -414,6 +423,7 @@ export default function Project() {
             </label>
             <RestrictionPicker
               name="project-restriction"
+              noun="project"
               value={restrictionTypeOf(project)}
               onChange={(type) => setProject({ ...project, ...restrictionFields(type) })}
               scope="project"
@@ -508,7 +518,7 @@ export default function Project() {
                         <strong>{a.name}</strong>
                         <div className="muted">
                           {nested} row{nested === 1 ? "" : "s"} · {rackCount} rack{rackCount === 1 ? "" : "s"} ·{" "}
-                          {formatHierarchyPower(watts, amps)} · {restrictionCaption(a, inheritedPhotoBlockers({ project }))}
+                          {formatHierarchyPower(watts, amps)} · {restrictionCaption(a)}
                         </div>
                       </span>
                     </button>
@@ -533,6 +543,7 @@ export default function Project() {
                     </label>
                     <RestrictionPicker
                       name={`area-restriction-${a.id}`}
+                      noun="area"
                       value={restrictionTypeOf(editingArea)}
                       onChange={(type) => setEditingArea({ ...editingArea, ...restrictionFields(type) })}
                       inherited={inheritedPhotoBlockers({ project })}
@@ -680,8 +691,7 @@ export default function Project() {
                     <strong>{r.name}</strong>
                     <div className="muted">
                       {parentArea?.name || "no area"} · {rackCount} rack
-                      {rackCount === 1 ? "" : "s"} · {formatHierarchyPower(watts, amps)} ·{" "}
-                      {restrictionCaption(r, inheritedPhotoBlockers({ project, area: parentArea }))}
+                      {rackCount === 1 ? "" : "s"} · {formatHierarchyPower(watts, amps)} · {restrictionCaption(r)}
                     </div>
                   </span>
                 </button>
@@ -719,7 +729,7 @@ export default function Project() {
               <PhotoGallery
                 entityType="row"
                 entityId={r.id}
-                allowed={photosAllowed({ project, area: parentArea, row: r })}
+                allowed={photosAllowed({ project, row: r })}
               />
             )}
             </div>
@@ -847,10 +857,7 @@ export default function Project() {
               });
             }}
           />
-          {racksForRow.map((r) => {
-            const parentRow = aisleRows.find((row) => row.id === r.row_id);
-            const parentArea = areas.find((a) => a.id === (r.area_id || parentRow?.area_id));
-            return (
+          {racksForRow.map((r) => (
             <div key={r.id}>
             <div className="list-item">
               <div className="list-main">
@@ -863,7 +870,7 @@ export default function Project() {
                     <strong>{r.name}</strong>
                     <div className="muted">
                       {layoutPath(r, aisleRows, areas)} · {r.ru_height}U · {formatHierarchyPower(sumPowerWatts(devices, [r.id]), sumDcAmps(devices, [r.id]))} ·{" "}
-                      {restrictionCaption(r, inheritedPhotoBlockers({ project, area: parentArea, row: parentRow }))}
+                      {restrictionCaption(r)}
                     </div>
                   </span>
                 </Link>
@@ -895,8 +902,7 @@ export default function Project() {
               </form>
             )}
             </div>
-            );
-          })}
+          ))}
         </div>
       )}
 
@@ -1042,7 +1048,7 @@ export default function Project() {
                       </td>
                       <td>
                         {d.name}
-                        {d.restricted || !photosAllowed({ project, area, row, rack }) ? " 🔒" : ""}
+                        {d.restricted || !photosAllowed({ project, row, rack, device: d }) ? " 🔒" : ""}
                         {d.undocumented ? " ⚠" : ""}
                       </td>
                       <td>{d.owner || "—"}</td>

@@ -81,7 +81,7 @@ export default function RestrictionPicker({
               : `Tagged ${typeLabel(value)} — do not photograph this or anything inside. `
             : ""}
           {inherited.length > 0
-            ? `Also blocked by ${inherited.map((hit) => `${hit.label} (${hit.type})`).join(", ")}.`
+            ? `Photos also blocked because ${inherited.map((hit) => `${hit.label} is ${hit.type}`).join(", ")}.`
             : ""}
         </p>
       )}

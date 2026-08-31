@@ -76,7 +76,7 @@ export default function CreateRowsPanel({
     <div className="card" style={{ marginTop: 16 }}>
       <h3>Rows</h3>
       <p>
-        Area → <strong>Row</strong> → Rack. Create the aisle set for this area, then pick a row for rack capture.
+        Area → <strong>Row</strong> → Rack. Create the aisle set for this area, then tag individual rows as government / EMSS if needed.
       </p>
       {error && <div className="error">{error}</div>}
       {msg && <div className="success">{msg}</div>}
