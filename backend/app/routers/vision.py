@@ -28,9 +28,11 @@ from app.schemas import (
     CLIP_SOURCES,
     DeviceOut,
     VisionClipOut,
+    VisionFieldIn,
     VisionJobOut,
     VisionLayoutAcceptIn,
     VisionLayoutAcceptOut,
+    VisionLayoutFieldIn,
     VisionProposalBatchIn,
     VisionProposalOut,
     VisionProposalPatch,
@@ -38,6 +40,7 @@ from app.schemas import (
     VisionSessionOut,
     VisionSessionStatusIn,
 )
+from app.vision_review import confirm_layout_field, confirm_proposal_field, skip_layout_field, skip_proposal_field
 from app.storage import get_storage, new_key
 from app.vision_policy import (
     RESTRICTED_REFUSAL,
@@ -134,6 +137,8 @@ def _proposal_out(row: VisionProposal) -> VisionProposalOut:
             "prompt_text": row.prompt_text,
             "extractor_model": row.extractor_model,
             "raw_extraction": _json_load(row.raw_extraction, row.raw_extraction or None),
+            "confirmed_fields": _json_load(row.confirmed_fields_json, []),
+            "skipped_fields": _json_load(row.skipped_fields_json, []),
             "accepted_device_id": row.accepted_device_id,
             "reviewed_by": row.reviewed_by,
             "reviewed_at": row.reviewed_at,
@@ -185,6 +190,7 @@ def _session_out(db: Session, session: VisionSession, include_children: bool = T
             "restricted_blocked": session.restricted_blocked,
             "error_detail": session.error_detail,
             "layout": _json_load(session.layout_json, None),
+            "layout_review": _json_load(session.layout_review_json, None) or {},
             "restriction_reasons": restriction_reasons(db, session),
             "created_by": session.created_by,
             "claimed_by": session.claimed_by,
@@ -658,6 +664,73 @@ def edit_proposal(
     db.commit()
     db.refresh(row)
     return _proposal_out(row)
+
+
+@router.post("/sessions/{session_id}/proposals/{proposal_id}/fields/{field}/confirm", response_model=VisionProposalOut)
+def confirm_field(
+    session_id: int,
+    proposal_id: int,
+    field: str,
+    body: VisionFieldIn | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(WriteUser),
+):
+    session = _get_session(db, session_id)
+    row = db.get(VisionProposal, proposal_id)
+    if not row or row.session_id != session.id:
+        raise HTTPException(404, "Proposal not found")
+    confirm_proposal_field(db, session, row, field, None if body is None else body.value, user)
+    _maybe_complete(db, session)
+    db.commit()
+    db.refresh(row)
+    return _proposal_out(row)
+
+
+@router.post("/sessions/{session_id}/proposals/{proposal_id}/fields/{field}/skip", response_model=VisionProposalOut)
+def skip_field(
+    session_id: int,
+    proposal_id: int,
+    field: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(WriteUser),
+):
+    session = _get_session(db, session_id)
+    row = db.get(VisionProposal, proposal_id)
+    if not row or row.session_id != session.id:
+        raise HTTPException(404, "Proposal not found")
+    skip_proposal_field(db, session, row, field, user)
+    _maybe_complete(db, session)
+    db.commit()
+    db.refresh(row)
+    return _proposal_out(row)
+
+
+@router.post("/sessions/{session_id}/layout/fields/confirm")
+def confirm_layout_item_field(
+    session_id: int,
+    body: VisionLayoutFieldIn,
+    db: Session = Depends(get_db),
+    _: User = Depends(WriteUser),
+):
+    session = _get_session(db, session_id)
+    result = confirm_layout_field(db, session, body.kind, body.index, body.field, body.value)
+    db.commit()
+    db.refresh(session)
+    return {"ok": True, **result, "session": _session_out(db, session)}
+
+
+@router.post("/sessions/{session_id}/layout/fields/skip")
+def skip_layout_item_field(
+    session_id: int,
+    body: VisionLayoutFieldIn,
+    db: Session = Depends(get_db),
+    _: User = Depends(WriteUser),
+):
+    session = _get_session(db, session_id)
+    result = skip_layout_field(session, body.kind, body.index, body.field)
+    db.commit()
+    db.refresh(session)
+    return {"ok": True, **result, "session": _session_out(db, session)}
 
 
 @router.post("/sessions/{session_id}/proposals/{proposal_id}/accept", response_model=DeviceOut)

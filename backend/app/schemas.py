@@ -579,6 +579,8 @@ class VisionProposalOut(ORMModel):
     prompt_text: str
     extractor_model: str
     raw_extraction: Any = None
+    confirmed_fields: list[str] = []
+    skipped_fields: list[str] = []
     accepted_device_id: Optional[int]
     reviewed_by: Optional[int]
     reviewed_at: Optional[datetime]
@@ -622,6 +624,7 @@ class VisionSessionOut(ORMModel):
     restricted_blocked: bool
     error_detail: str
     layout: Any = None
+    layout_review: Any = None
     restriction_reasons: list[str] = []
     created_by: Optional[int]
     claimed_by: Optional[int]
@@ -659,3 +662,14 @@ class VisionLayoutAcceptOut(BaseModel):
     existing: list[RowOut] = []
     racks_created: list[RackOut] = []
     racks_existing: list[RackOut] = []
+
+
+class VisionFieldIn(BaseModel):
+    value: Any = None
+
+
+class VisionLayoutFieldIn(BaseModel):
+    kind: Literal["area", "row", "rack"]
+    index: int = Field(ge=0)
+    field: str
+    value: Any = None

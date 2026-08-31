@@ -14,6 +14,7 @@ import PhotoGallery from "../components/PhotoGallery";
 import RelocateDialog, { RelocateKind } from "../components/RelocateDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { parseIdParam, projectHref } from "../nav";
+import AiImageParse, { EntryMode, EntryModeRadios } from "../components/AiImageParse";
 
 export default function RackPage() {
   const { id, rackId } = useParams();
@@ -37,6 +38,7 @@ export default function RackPage() {
     null,
   );
   const [height, setHeight] = useState(42);
+  const [deviceMode, setDeviceMode] = useState<EntryMode>("manual");
 
   async function load() {
     try {
@@ -196,19 +198,34 @@ export default function RackPage() {
           </form>
           <form className="card" onSubmit={addDevice} style={{ marginTop: 12 }}>
             <h3>Add device to this rack</h3>
-            <DeviceFields
-              value={draft}
-              onChange={setDraft}
-              racks={racks}
-              areas={areas}
-              rows={aisleRows}
-              devices={elev.devices}
-              pdus={pdus}
-              showLocation={false}
-              pendingPhotos={photos}
-              onPendingPhotos={setPhotos}
-            />
-            <button className="btn primary block">Save device</button>
+            <EntryModeRadios name="entry-rack-device" value={deviceMode} onChange={setDeviceMode} />
+            {deviceMode === "ai" ? (
+              <AiImageParse
+                projectId={pid}
+                target="device"
+                areaId={elev.rack.area_id || ""}
+                rowId={elev.rack.row_id || ""}
+                rackId={rid}
+                areas={areas}
+                onInventoryChanged={load}
+              />
+            ) : (
+              <>
+                <DeviceFields
+                  value={draft}
+                  onChange={setDraft}
+                  racks={racks}
+                  areas={areas}
+                  rows={aisleRows}
+                  devices={elev.devices}
+                  pdus={pdus}
+                  showLocation={false}
+                  pendingPhotos={photos}
+                  onPendingPhotos={setPhotos}
+                />
+                <button className="btn primary block">Save device</button>
+              </>
+            )}
           </form>
           <div className="card" style={{ marginTop: 12 }}>
             <PhotoGallery entityType="rack" entityId={rid} />

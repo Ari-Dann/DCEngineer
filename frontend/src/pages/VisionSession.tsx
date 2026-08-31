@@ -44,6 +44,60 @@ function EvidenceThumbs({ ids }: { ids: number[] }) {
   );
 }
 
+function FieldConfirmBar({
+  field,
+  proposal,
+  session,
+  value,
+  locked,
+  busy,
+  onChanged,
+}: {
+  field: string;
+  proposal: VisionProposal;
+  session: VisionSession;
+  value: unknown;
+  locked: boolean;
+  busy: boolean;
+  onChanged: () => void;
+}) {
+  const confirmed = (proposal.confirmed_fields || []).map((f) => f.toLowerCase()).includes(field);
+  const skipped = (proposal.skipped_fields || []).map((f) => f.toLowerCase()).includes(field);
+  if (locked || confirmed || skipped) {
+    return (
+      <span className="muted" style={{ fontSize: "0.8rem" }}>
+        {confirmed ? "confirmed" : skipped ? "skipped" : ""}
+      </span>
+    );
+  }
+  return (
+    <div className="field-confirm-actions" style={{ marginTop: 4 }}>
+      <button
+        type="button"
+        className="btn good"
+        disabled={busy}
+        onClick={async () => {
+          await vision.confirmField(session.id, proposal.id, field, value);
+          onChanged();
+        }}
+      >
+        Confirm
+      </button>
+      <button
+        type="button"
+        className="btn"
+        disabled={busy}
+        onClick={async () => {
+          await vision.skipField(session.id, proposal.id, field);
+          onChanged();
+        }}
+      >
+        Skip
+      </button>
+    </div>
+  );
+}
+
 function ProposalCard({
   session,
   proposal,
@@ -134,38 +188,46 @@ function ProposalCard({
         <label className="field">
           <span>Name</span>
           <input value={draft.name} disabled={locked} onChange={(e) => set("name", e.target.value)} />
+          <FieldConfirmBar field="name" proposal={proposal} session={session} value={draft.name} locked={locked} busy={busy} onChanged={onChanged} />
         </label>
         <label className="field">
           <span>Hostname</span>
           <input value={draft.hostname} disabled={locked} onChange={(e) => set("hostname", e.target.value)} />
+          <FieldConfirmBar field="hostname" proposal={proposal} session={session} value={draft.hostname} locked={locked} busy={busy} onChanged={onChanged} />
         </label>
       </div>
       <div className="row three">
         <label className="field">
           <span>Vendor</span>
           <input value={draft.vendor} disabled={locked} onChange={(e) => set("vendor", e.target.value)} />
+          <FieldConfirmBar field="vendor" proposal={proposal} session={session} value={draft.vendor} locked={locked} busy={busy} onChanged={onChanged} />
         </label>
         <label className="field">
           <span>Model</span>
           <input value={draft.model} disabled={locked} onChange={(e) => set("model", e.target.value)} />
+          <FieldConfirmBar field="model" proposal={proposal} session={session} value={draft.model} locked={locked} busy={busy} onChanged={onChanged} />
         </label>
         <label className="field">
           <span>Type</span>
           <input value={draft.device_type} disabled={locked} onChange={(e) => set("device_type", e.target.value)} />
+          <FieldConfirmBar field="device_type" proposal={proposal} session={session} value={draft.device_type} locked={locked} busy={busy} onChanged={onChanged} />
         </label>
       </div>
       <div className="row three">
         <label className="field">
           <span>Serial</span>
           <input value={draft.serial} disabled={locked} onChange={(e) => set("serial", e.target.value)} />
+          <FieldConfirmBar field="serial" proposal={proposal} session={session} value={draft.serial} locked={locked} busy={busy} onChanged={onChanged} />
         </label>
         <label className="field">
           <span>Asset tag</span>
           <input value={draft.asset_tag} disabled={locked} onChange={(e) => set("asset_tag", e.target.value)} />
+          <FieldConfirmBar field="asset_tag" proposal={proposal} session={session} value={draft.asset_tag} locked={locked} busy={busy} onChanged={onChanged} />
         </label>
         <label className="field">
           <span>Owner</span>
           <input value={draft.owner} disabled={locked} onChange={(e) => set("owner", e.target.value)} />
+          <FieldConfirmBar field="owner" proposal={proposal} session={session} value={draft.owner} locked={locked} busy={busy} onChanged={onChanged} />
         </label>
       </div>
       <div className="row three">
@@ -224,7 +286,7 @@ function ProposalCard({
       {!locked && (
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
           <button className="btn good" disabled={busy}>
-            {busy ? "Saving…" : "Accept into inventory"}
+            {busy ? "Saving…" : "Confirm remaining"}
           </button>
           <button type="button" className="btn danger" disabled={busy} onClick={onReject}>
             Reject
@@ -299,8 +361,8 @@ export default function VisionSessionPage() {
       </div>
       <h1>Vision session #{session.id}</h1>
       <p>
-        Staging only. Create suggested rows into the Area → Row → Rack hierarchy without writing devices. Accepting a
-        device proposal copies evidence photos onto that record. Rejecting leaves inventory unchanged.
+        Staging only. Confirm each suggested field on its own. Confirming a name writes that area, row, rack, or device;
+        skipped fields stay blank. Rejecting a device leaves inventory unchanged.
       </p>
       {error && <div className="error">{error}</div>}
       <div className="card">

@@ -26,6 +26,7 @@ import RelocateDialog, { RelocateKind } from "../components/RelocateDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PromptDialog } from "../components/PromptDialog";
 import { ItemSelect, SelectMode, SelectModeToggle, SelectionToolbar } from "../components/SelectionBar";
+import AiImageParse, { EntryMode, EntryModeRadios } from "../components/AiImageParse";
 import { parseIdParam, projectHref, rackHref } from "../nav";
 
 const TABS = ["overview", "areas", "rows", "racks", "devices", "locate", "cables", "checklists", "handoffs", "lifecycle"] as const;
@@ -71,6 +72,10 @@ export default function Project() {
   const [rowName, setRowName] = useState("");
   const [rowAreaId, setRowAreaId] = useState<number | "">("");
   const [rowBulk, setRowBulk] = useState("");
+  const [areaMode, setAreaMode] = useState<EntryMode>("manual");
+  const [rowMode, setRowMode] = useState<EntryMode>("manual");
+  const [rackMode, setRackMode] = useState<EntryMode>("manual");
+  const [deviceMode, setDeviceMode] = useState<EntryMode>("manual");
   const [rackName, setRackName] = useState("");
   const [rackHeight, setRackHeight] = useState(42);
   const [deviceArea, setDeviceArea] = useState<number | "">("");
@@ -393,7 +398,11 @@ export default function Project() {
 
       {tab === "areas" && (
         <div className="card">
+          <EntryModeRadios name="entry-areas" value={areaMode} onChange={setAreaMode} />
           <p className="muted">Click an area to open its rows. Use Individual or Bulk to select items to edit, move, or delete.</p>
+          {areaMode === "ai" ? (
+            <AiImageParse projectId={pid} target="area" areas={areas} onInventoryChanged={load} />
+          ) : (
           <form
             onSubmit={async (e) => {
               e.preventDefault();
@@ -411,6 +420,7 @@ export default function Project() {
               </button>
             )}
           </form>
+          )}
           <SelectModeToggle mode={selectMode} onChange={changeSelectMode} />
           <SelectionToolbar
             noun="area"
@@ -505,10 +515,10 @@ export default function Project() {
 
       {tab === "rows" && (
         <div className="card">
+          <EntryModeRadios name="entry-rows" value={rowMode} onChange={setRowMode} />
           <p className="muted">
             Rows sit between areas and racks. {currentArea ? `Showing ${currentArea.name}.` : "Filter by area, or add a set below."}{" "}
-            Click a row to open its racks.{" "}
-            <Link to="/capture">Create from photos / video on Capture</Link>
+            Click a row to open its racks.
           </p>
           {currentArea && (
             <p>
@@ -529,6 +539,15 @@ export default function Project() {
               ))}
             </select>
           </label>
+          {rowMode === "ai" ? (
+            <AiImageParse
+              projectId={pid}
+              target="row"
+              areaId={rowAreaId || areaFilter || ""}
+              areas={areas}
+              onInventoryChanged={load}
+            />
+          ) : (
           <form
             onSubmit={async (e) => {
               e.preventDefault();
@@ -570,6 +589,7 @@ export default function Project() {
               Create rows
             </button>
           </form>
+          )}
           {rowsForArea.length === 0 && (
             <p className="muted" style={{ marginTop: 12 }}>
               No rows yet. Add them here or capture a wide aisle shot on Capture and create the suggested names.
@@ -628,6 +648,7 @@ export default function Project() {
 
       {tab === "racks" && (
         <div className="card">
+          <EntryModeRadios name="entry-racks" value={rackMode} onChange={setRackMode} />
           <p className="muted">
             {currentRow
               ? `Racks in ${currentRow.name}. Click a rack to open its elevation.`
@@ -670,6 +691,16 @@ export default function Project() {
               </select>
             </label>
           </div>
+          {rackMode === "ai" ? (
+            <AiImageParse
+              projectId={pid}
+              target="rack"
+              areaId={areaFilter || ""}
+              rowId={rowFilter || ""}
+              areas={areas}
+              onInventoryChanged={load}
+            />
+          ) : (
           <form
             onSubmit={async (e) => {
               e.preventDefault();
@@ -695,6 +726,7 @@ export default function Project() {
               Add rack to row
             </button>
           </form>
+          )}
           <SelectModeToggle mode={selectMode} onChange={changeSelectMode} />
           <SelectionToolbar
             noun="rack"
@@ -742,6 +774,7 @@ export default function Project() {
       {tab === "devices" && (
         <>
           <div className="card">
+            <EntryModeRadios name="entry-devices" value={deviceMode} onChange={setDeviceMode} />
             <div className="row three">
               <label className="field">
                 <span>Area</span>
@@ -790,6 +823,17 @@ export default function Project() {
                 </select>
               </label>
             </div>
+            {deviceMode === "ai" && (
+              <AiImageParse
+                projectId={pid}
+                target="device"
+                areaId={deviceArea || ""}
+                rowId={deviceRow || ""}
+                rackId={deviceRack || ""}
+                areas={areas}
+                onInventoryChanged={load}
+              />
+            )}
             <label className="field">
               <span>Filter</span>
               <input

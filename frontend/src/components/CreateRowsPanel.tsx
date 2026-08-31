@@ -1,6 +1,6 @@
 import { FormEvent, useState } from "react";
-import { AisleRow, Area, LayoutAcceptResult, Rack, projects } from "../api";
-import VisionAssist from "./VisionAssist";
+import { AisleRow, Area, Rack, projects } from "../api";
+import AiImageParse, { EntryMode, EntryModeRadios } from "./AiImageParse";
 
 function parseNames(raw: string) {
   return raw
@@ -23,29 +23,17 @@ export default function CreateRowsPanel({
   projectId,
   areas,
   rows,
-  racks,
   areaId,
   onAreaChange,
   onCreated,
 }: Props) {
-  const [mode, setMode] = useState<"manual" | "photo">("manual");
+  const [mode, setMode] = useState<EntryMode>("manual");
   const [names, setNames] = useState("");
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
 
   const rowsHere = areaId ? rows.filter((r) => r.area_id === areaId) : rows;
-
-  function summarize(result: { created: AisleRow[]; existing: AisleRow[] }) {
-    const created = result.created.map((r) => r.name);
-    const existing = result.existing.map((r) => r.name);
-    const parts = [
-      created.length ? `Created ${created.join(", ")}` : "",
-      existing.length ? `Already present: ${existing.join(", ")}` : "",
-    ].filter(Boolean);
-    setMsg(parts.join(". ") || "No new rows.");
-    if (result.created.length) onCreated(result.created);
-  }
 
   async function onManual(e: FormEvent) {
     e.preventDefault();
@@ -64,17 +52,19 @@ export default function CreateRowsPanel({
     try {
       const result = await projects.addRows(projectId, { area_id: Number(areaId), names: list });
       setNames("");
-      summarize(result);
+      const created = result.created.map((r) => r.name);
+      const existing = result.existing.map((r) => r.name);
+      setMsg(
+        [created.length ? `Created ${created.join(", ")}` : "", existing.length ? `Already present: ${existing.join(", ")}` : ""]
+          .filter(Boolean)
+          .join(". ") || "No new rows.",
+      );
+      if (result.created.length) onCreated(result.created);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create rows");
     } finally {
       setBusy(false);
     }
-  }
-
-  function afterLayout(result: LayoutAcceptResult) {
-    setError("");
-    summarize(result);
   }
 
   return (
@@ -87,10 +77,7 @@ export default function CreateRowsPanel({
       {msg && <div className="success">{msg}</div>}
       <label className="field">
         <span>Area for new rows</span>
-        <select
-          value={areaId}
-          onChange={(e) => onAreaChange(e.target.value ? Number(e.target.value) : "")}
-        >
+        <select value={areaId} onChange={(e) => onAreaChange(e.target.value ? Number(e.target.value) : "")}>
           <option value="">Select an area</option>
           {areas.map((a) => (
             <option key={a.id} value={a.id}>
@@ -99,41 +86,24 @@ export default function CreateRowsPanel({
           ))}
         </select>
       </label>
-          <div className="choice compact">
-        <button type="button" className={`btn ${mode === "manual" ? "on" : ""}`} onClick={() => setMode("manual")}>
-          Manual
-        </button>
-        <button type="button" className={`btn ${mode === "photo" ? "on" : ""}`} onClick={() => setMode("photo")}>
-          Photo / video
-        </button>
-      </div>
+      <EntryModeRadios name="entry-capture-rows" value={mode} onChange={setMode} />
       {mode === "manual" ? (
         <form onSubmit={onManual}>
           <label className="field">
             <span>Row names (one per line)</span>
-            <textarea
-              value={names}
-              onChange={(e) => setNames(e.target.value)}
-              placeholder={"A01\nA02\nA03"}
-              rows={5}
-            />
+            <textarea value={names} onChange={(e) => setNames(e.target.value)} placeholder={"A01\nA02\nA03"} rows={5} />
           </label>
           <button className="btn primary" disabled={busy || !areaId}>
             {busy ? "Creating…" : "Create rows"}
           </button>
         </form>
       ) : (
-        <VisionAssist
+        <AiImageParse
           projectId={projectId}
+          target="row"
           areaId={areaId}
-          rowId=""
-          rackId=""
           areas={areas}
-          rows={rows}
-          racks={racks}
-          purpose="layout"
-          embedded
-          onLayoutAccepted={afterLayout}
+          onInventoryChanged={() => onCreated([])}
         />
       )}
       {rowsHere.length > 0 && (
@@ -143,7 +113,7 @@ export default function CreateRowsPanel({
       )}
       {rowsHere.length === 0 && (
         <p className="muted" style={{ marginTop: 12 }}>
-          No rows yet. Add a set here, or capture a wide aisle shot and create the suggested names.
+          No rows yet. Add a set here, or use AI image parse on a wide aisle shot and confirm each name.
         </p>
       )}
     </div>
