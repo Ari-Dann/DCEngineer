@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { AisleRow, Area, Device, PDU, Project, Rack, enqueue, layoutPath, projects, uploadPhotos } from "../api";
 import { DeviceEditorModal, DeviceFields, emptyDraft, payloadFromDraft } from "../components/DeviceEditor";
+import CreateRowsPanel from "../components/CreateRowsPanel";
 import LocatePanel from "../components/LocatePanel";
 import VisionAssist from "../components/VisionAssist";
 import type { DeviceDraft } from "../components/DeviceEditor";
@@ -36,25 +37,28 @@ export default function Capture() {
 
   useEffect(() => {
     if (!pid) return;
-    Promise.all([
+    reloadLayout();
+  }, [pid]);
+
+  async function reloadLayout() {
+    if (!pid) return;
+    const [nextAreas, nextRows, nextRacks, nextPdus] = await Promise.all([
       projects.areas(Number(pid)),
       projects.rows(Number(pid)),
       projects.racks(Number(pid)),
       projects.projectPdus(Number(pid)),
-    ]).then(([nextAreas, nextRows, nextRacks, nextPdus]) => {
-        setAreas(nextAreas);
-        setAisleRows(nextRows);
-        setRacks(nextRacks);
-        setPdus(nextPdus);
-        setAreaId((current) => (current && nextAreas.some((a) => a.id === current) ? current : ""));
-        setRowId((current) => (current && nextRows.some((r) => r.id === current) ? current : ""));
-        setRid((current) => {
-          if (current && nextRacks.some((r) => r.id === current)) return current;
-          return "";
-        });
-      },
-    );
-  }, [pid]);
+    ]);
+    setAreas(nextAreas);
+    setAisleRows(nextRows);
+    setRacks(nextRacks);
+    setPdus(nextPdus);
+    setAreaId((current) => (current && nextAreas.some((a) => a.id === current) ? current : ""));
+    setRowId((current) => (current && nextRows.some((r) => r.id === current) ? current : ""));
+    setRid((current) => {
+      if (current && nextRacks.some((r) => r.id === current)) return current;
+      return "";
+    });
+  }
 
   useEffect(() => {
     setDraft((d) => ({ ...d, rack_id: rid }));
@@ -131,11 +135,11 @@ export default function Capture() {
   return (
     <div className="page">
       <h1>Onsite capture</h1>
-      <p>Phase 2 rack-by-rack intake. Scan window, in-app photos, vendor dropdowns, and locate-from-search.</p>
+      <p>Phase 2 intake. Create rows under an area (typed or from aisle photos), then capture rack by rack.</p>
       {project?.photography_rules && <div className="banner">{project.photography_rules}</div>}
       {error && <div className="error">{error}</div>}
       {msg && <div className="success">{msg}</div>}
-      <form className="card" onSubmit={onSubmit}>
+      <div className="card">
         <div className="row">
           <label className="field">
             <span>Project</span>
@@ -166,6 +170,32 @@ export default function Capture() {
             </select>
           </label>
         </div>
+      </div>
+
+      {pid && (
+        <CreateRowsPanel
+          projectId={Number(pid)}
+          areas={areas}
+          rows={aisleRows}
+          racks={racks}
+          areaId={areaId}
+          onAreaChange={(next) => {
+            setAreaId(next);
+            setRowId("");
+            setRid("");
+          }}
+          onCreated={(created) => {
+            reloadLayout().then(() => {
+              if (created[0]) {
+                setRowId(created[0].id);
+                setRid("");
+              }
+            });
+          }}
+        />
+      )}
+
+      <form className="card" onSubmit={onSubmit} style={{ marginTop: 16 }}>
         <div className="row">
           <label className="field">
             <span>Row</span>

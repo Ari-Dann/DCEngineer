@@ -319,6 +319,78 @@ def test_accept_requires_name(client, auth):
     assert "name" in res.json()["detail"].lower()
 
 
+def test_vision_layout_accept_creates_rows_not_devices(client, auth):
+    sidecar = _sidecar(client, auth, "vision-sidecar-rows")
+    project = _project(client, auth, "Aisle Rows")
+    area = _area(client, auth, project["id"])
+    session = _session(client, auth, project["id"], area_id=area["id"], shot_kind="aisle_wide")
+    _clip(client, auth, session["id"], kind="aisle_wide")
+    client.post(f"/api/vision/sessions/{session['id']}/analyze", headers=auth)
+    posted = client.post(
+        f"/api/vision/sessions/{session['id']}/proposals",
+        headers=sidecar,
+        json={
+            "model": "claude-test",
+            "prompt_text": "layout only",
+            "raw_extraction": {"devices": []},
+            "layout": {
+                "rows": [{"name": "A12"}, {"name": "A13"}, {"name": ""}],
+                "racks": [{"name": "A12-01", "row_name": "A12", "ru_height": 42}],
+            },
+            "proposals": [],
+        },
+    )
+    assert posted.status_code == 201, posted.text
+    denied = client.post(f"/api/vision/sessions/{session['id']}/layout/accept", headers=sidecar, json={})
+    assert denied.status_code == 403
+    before_devices = client.get(f"/api/projects/{project['id']}/devices", headers=auth).json()
+    assert before_devices == []
+    accepted = client.post(
+        f"/api/vision/sessions/{session['id']}/layout/accept",
+        headers=auth,
+        json={"create_racks": True},
+    )
+    assert accepted.status_code == 200, accepted.text
+    body = accepted.json()
+    assert [r["name"] for r in body["created"]] == ["A12", "A13"]
+    assert [r["area_id"] for r in body["created"]] == [area["id"], area["id"]]
+    assert [r["name"] for r in body["racks_created"]] == ["A12-01"]
+    rows = client.get(f"/api/projects/{project['id']}/rows", headers=auth).json()
+    assert {r["name"] for r in rows} == {"A12", "A13"}
+    racks = client.get(f"/api/projects/{project['id']}/racks", headers=auth).json()
+    assert any(r["name"] == "A12-01" and r["row_label"] == "A12" for r in racks)
+    devices = client.get(f"/api/projects/{project['id']}/devices", headers=auth).json()
+    assert devices == []
+    again = client.post(
+        f"/api/vision/sessions/{session['id']}/layout/accept",
+        headers=auth,
+        json={"names": ["A12", "A14"]},
+    )
+    assert [r["name"] for r in again.json()["created"]] == ["A14"]
+    assert [r["name"] for r in again.json()["existing"]] == ["A12"]
+
+
+def test_vision_layout_accept_requires_area_and_names(client, auth):
+    project = _project(client, auth, "No Area Layout")
+    session = _session(client, auth, project["id"], shot_kind="aisle_wide")
+    missing_area = client.post(f"/api/vision/sessions/{session['id']}/layout/accept", headers=auth, json={"names": ["A01"]})
+    assert missing_area.status_code == 400
+    area = _area(client, auth, project["id"])
+    missing_names = client.post(
+        f"/api/vision/sessions/{session['id']}/layout/accept",
+        headers=auth,
+        json={"area_id": area["id"]},
+    )
+    assert missing_names.status_code == 400
+    created = client.post(
+        f"/api/vision/sessions/{session['id']}/layout/accept",
+        headers=auth,
+        json={"area_id": area["id"], "names": ["B01", "B02"]},
+    )
+    assert created.status_code == 200, created.text
+    assert [r["name"] for r in created.json()["created"]] == ["B01", "B02"]
+
+
 def test_restriction_reasons_from_area(client, auth):
     project = _project(client, auth, "Policy")
     area = _area(client, auth, project["id"], name="EMSS", restricted=True)

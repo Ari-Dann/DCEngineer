@@ -11,7 +11,9 @@ from app.catalog import learn_values
 from app.config import get_settings
 from app.database import get_db
 from app.deps import VisionWorker, WriteUser, get_current_user
+from app.layout import bulk_create_rows, names_from_layout, racks_from_layout, resolve_or_create_rack, unique_labels
 from app.models import (
+    AisleRow,
     Attachment,
     Device,
     Rack,
@@ -20,13 +22,15 @@ from app.models import (
     VisionProposal,
     VisionSession,
 )
-from app.routers.inventory import _ensure_rack_fits, _get_project, device_out
+from app.routers.inventory import _ensure_rack_fits, _get_area, _get_project, device_out
 from app.schemas import (
     CLIP_KINDS,
     CLIP_SOURCES,
     DeviceOut,
     VisionClipOut,
     VisionJobOut,
+    VisionLayoutAcceptIn,
+    VisionLayoutAcceptOut,
     VisionProposalBatchIn,
     VisionProposalOut,
     VisionProposalPatch,
@@ -319,6 +323,65 @@ def list_jobs(db: Session = Depends(get_db), _: User = Depends(VisionWorker)):
 @router.get("/sessions/{session_id}", response_model=VisionSessionOut)
 def get_session(session_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     return _session_out(db, _get_session(db, session_id))
+
+
+@router.post("/sessions/{session_id}/layout/accept", response_model=VisionLayoutAcceptOut)
+def accept_layout(
+    session_id: int,
+    body: VisionLayoutAcceptIn,
+    db: Session = Depends(get_db),
+    _: User = Depends(WriteUser),
+):
+    session = _get_session(db, session_id)
+    area_id = body.area_id or session.area_id
+    if not area_id:
+        raise HTTPException(400, "Select an area before creating rows")
+    _get_area(db, session.project_id, area_id)
+    if session.area_id is None:
+        session.area_id = area_id
+    layout = _json_load(session.layout_json, {}) or {}
+    labels = unique_labels(body.names) if body.names is not None else names_from_layout(layout)
+    if not labels:
+        raise HTTPException(400, "No row names to create — type them or capture an aisle shot first")
+    created, existing = bulk_create_rows(db, session.project_id, area_id, labels)
+    row_by_name = {row.name.casefold(): row for row in existing + created}
+    racks_created = []
+    racks_existing = []
+    if body.create_racks:
+        for item in racks_from_layout(layout):
+            row_name = str(item.get("row_name") or "").strip()
+            row = row_by_name.get(row_name.casefold()) if row_name else None
+            if row is None and session.row_id:
+                row = db.get(AisleRow, session.row_id)
+            ru = item.get("ru_height")
+            try:
+                ru_height = int(ru) if ru is not None else None
+            except (TypeError, ValueError):
+                ru_height = None
+            rack, was_created = resolve_or_create_rack(
+                db,
+                session.project_id,
+                str(item.get("name") or ""),
+                row=row,
+                area_id=area_id,
+                ru_height=ru_height,
+            )
+            if was_created:
+                racks_created.append(rack)
+            else:
+                racks_existing.append(rack)
+    session.updated_at = _now()
+    db.commit()
+    for row in created + existing:
+        db.refresh(row)
+    for rack in racks_created + racks_existing:
+        db.refresh(rack)
+    return VisionLayoutAcceptOut(
+        created=created,
+        existing=existing,
+        racks_created=racks_created,
+        racks_existing=racks_existing,
+    )
 
 
 @router.delete("/sessions/{session_id}")

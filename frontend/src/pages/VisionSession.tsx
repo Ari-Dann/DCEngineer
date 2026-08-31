@@ -243,11 +243,18 @@ export default function VisionSessionPage() {
   const [racks, setRacks] = useState<Rack[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [rowNames, setRowNames] = useState("");
+  const [createRacks, setCreateRacks] = useState(false);
+  const [layoutMsg, setLayoutMsg] = useState("");
 
   async function load() {
     const next = await vision.get(sessionId);
     setSession(next);
     setRacks(await projects.racks(next.project_id));
+    const suggested = ((next.layout as { rows?: { name?: string }[] } | null)?.rows || [])
+      .map((r) => (r.name || "").trim())
+      .filter(Boolean);
+    setRowNames((current) => current || suggested.join("\n"));
   }
 
   useEffect(() => {
@@ -258,7 +265,12 @@ export default function VisionSessionPage() {
     setBusy(true);
     setError("");
     try {
-      setSession(await vision.analyze(sessionId));
+      const next = await vision.analyze(sessionId);
+      setSession(next);
+      const suggested = ((next.layout as { rows?: { name?: string }[] } | null)?.rows || [])
+        .map((r) => (r.name || "").trim())
+        .filter(Boolean);
+      if (suggested.length) setRowNames((current) => current || suggested.join("\n"));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Analyze failed");
     } finally {
@@ -287,8 +299,8 @@ export default function VisionSessionPage() {
       </div>
       <h1>Vision session #{session.id}</h1>
       <p>
-        Staging only. Accepting a proposal creates a device and copies evidence photos onto that record. Rejecting
-        leaves inventory unchanged.
+        Staging only. Create suggested rows into the Area → Row → Rack hierarchy without writing devices. Accepting a
+        device proposal copies evidence photos onto that record. Rejecting leaves inventory unchanged.
       </p>
       {error && <div className="error">{error}</div>}
       <div className="card">
@@ -311,9 +323,60 @@ export default function VisionSessionPage() {
         {layout && (
           <div style={{ marginTop: 12 }}>
             <h3>Suggested layout</h3>
-            <p className="muted">{layout.notes || "From the wide / aisle shots. Not written until you create rows and racks yourself."}</p>
-            {layout.rows?.length ? <p>Rows: {layout.rows.map((r) => r.name).join(", ")}</p> : null}
-            {layout.racks?.length ? <p>Racks: {layout.racks.map((r) => r.name).join(", ")}</p> : null}
+            <p className="muted">
+              {layout.notes || "From the wide / aisle shots. Review the names, then create rows under this session’s area."}
+            </p>
+            {layoutMsg && <div className="success">{layoutMsg}</div>}
+            <label className="field">
+              <span>Row names to create (one per line)</span>
+              <textarea value={rowNames} onChange={(e) => setRowNames(e.target.value)} rows={5} placeholder={"A01\nA02"} />
+            </label>
+            {layout.racks?.length ? (
+              <label className="check-row">
+                <input type="checkbox" checked={createRacks} onChange={(e) => setCreateRacks(e.target.checked)} />
+                <span>Also create placeholder racks ({layout.racks.map((r) => r.name).filter(Boolean).join(", ")})</span>
+              </label>
+            ) : null}
+            <button
+              type="button"
+              className="btn primary"
+              disabled={busy || !rowNames.trim()}
+              onClick={async () => {
+                setBusy(true);
+                setError("");
+                setLayoutMsg("");
+                try {
+                  const names = rowNames
+                    .split(/[\n,;]+/)
+                    .map((s) => s.trim())
+                    .filter(Boolean);
+                  const result = await vision.acceptLayout(session.id, {
+                    area_id: session.area_id,
+                    names,
+                    create_racks: createRacks,
+                  });
+                  const created = result.created.map((r) => r.name).join(", ");
+                  const existing = result.existing.map((r) => r.name).join(", ");
+                  const racksMade = result.racks_created.map((r) => r.name).join(", ");
+                  setLayoutMsg(
+                    [
+                      created ? `Created rows ${created}` : "",
+                      existing ? `Already present: ${existing}` : "",
+                      racksMade ? `Created racks ${racksMade}` : "",
+                    ]
+                      .filter(Boolean)
+                      .join(". ") || "No new rows.",
+                  );
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Could not create rows");
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              style={{ marginTop: 8 }}
+            >
+              Create rows
+            </button>
           </div>
         )}
       </div>

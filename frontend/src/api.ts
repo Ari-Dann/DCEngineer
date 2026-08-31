@@ -150,6 +150,8 @@ export const projects = {
     api<AisleRow[]>(`/api/projects/${id}/rows${areaId ? `?area_id=${areaId}` : ""}`),
   addRow: (id: number, body: Partial<AisleRow> & { name: string }) =>
     api<AisleRow>(`/api/projects/${id}/rows`, { method: "POST", body: JSON.stringify(body) }),
+  addRows: (id: number, body: { area_id: number; names: string[] }) =>
+    api<RowBulkResult>(`/api/projects/${id}/rows/bulk`, { method: "POST", body: JSON.stringify(body) }),
   updateRow: (id: number, rowId: number, body: Partial<AisleRow> & { name: string }) =>
     api<AisleRow>(`/api/projects/${id}/rows/${rowId}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteRow: (id: number, rowId: number) =>
@@ -526,6 +528,11 @@ export const vision = {
     api<Device>(`/api/vision/sessions/${sessionId}/proposals/${proposalId}/accept`, { method: "POST" }),
   reject: (sessionId: number, proposalId: number) =>
     api<VisionProposal>(`/api/vision/sessions/${sessionId}/proposals/${proposalId}/reject`, { method: "POST" }),
+  acceptLayout: (sessionId: number, body?: { area_id?: number | null; names?: string[]; create_racks?: boolean }) =>
+    api<LayoutAcceptResult>(`/api/vision/sessions/${sessionId}/layout/accept`, {
+      method: "POST",
+      body: JSON.stringify(body || {}),
+    }),
 };
 
 export async function uploadVisionClip(
@@ -594,6 +601,11 @@ export type AisleRow = {
   notes: string;
 };
 
+export type RowBulkResult = {
+  created: AisleRow[];
+  existing: AisleRow[];
+};
+
 export type RelocateBody = {
   target_project_id: number;
   target_area_id?: number | null;
@@ -614,6 +626,11 @@ export type Rack = {
   ru_height: number;
   width_inches: number;
   notes: string;
+};
+
+export type LayoutAcceptResult = RowBulkResult & {
+  racks_created: Rack[];
+  racks_existing: Rack[];
 };
 
 export function layoutPath(rack: Rack, rows: AisleRow[] = [], areas: Area[] = []) {

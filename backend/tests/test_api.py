@@ -1605,6 +1605,44 @@ def test_visio_office_export_preserves_hierarchy_and_pictures(client, auth):
     assert unlocated["id"]
 
 
+def test_bulk_create_rows_under_area(client, auth):
+    project = client.post(
+        "/api/projects",
+        headers=auth,
+        json={"name": "Row Set", "customer": "Acme", "site_name": "DC1", "revision": "A"},
+    )
+    pid = project.json()["id"]
+    area = client.post(
+        f"/api/projects/{pid}/areas",
+        headers=auth,
+        json={"name": "Hall A", "in_scope": True},
+    )
+    aid = area.json()["id"]
+    empty = client.post(f"/api/projects/{pid}/rows/bulk", headers=auth, json={"area_id": aid, "names": ["  ", ""]})
+    assert empty.status_code == 400
+    created = client.post(
+        f"/api/projects/{pid}/rows/bulk",
+        headers=auth,
+        json={"area_id": aid, "names": ["A01", "A02", "a01", "  A03  "]},
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert [r["name"] for r in body["created"]] == ["A01", "A02", "A03"]
+    assert body["existing"] == []
+    again = client.post(
+        f"/api/projects/{pid}/rows/bulk",
+        headers=auth,
+        json={"area_id": aid, "names": ["A01", "A04"]},
+    )
+    assert again.status_code == 201
+    assert [r["name"] for r in again.json()["created"]] == ["A04"]
+    assert [r["name"] for r in again.json()["existing"]] == ["A01"]
+    listed = client.get(f"/api/projects/{pid}/rows", headers=auth).json()
+    assert [r["name"] for r in listed] == ["A01", "A02", "A03", "A04"]
+    assert all(r["area_id"] == aid for r in listed)
+
+
+
 
 
 

@@ -126,6 +126,16 @@ class RowOut(RowIn, ORMModel):
     project_id: int
 
 
+class RowBulkIn(BaseModel):
+    area_id: int
+    names: list[str]
+
+
+class RowBulkOut(BaseModel):
+    created: list[RowOut] = []
+    existing: list[RowOut] = []
+
+
 class RelocateIn(BaseModel):
     target_project_id: int
     target_area_id: Optional[int] = None
@@ -636,3 +646,16 @@ class VisionJobOut(ORMModel):
     rack_id: Optional[int]
     clip_count: int = 0
     created_at: datetime
+
+
+class VisionLayoutAcceptIn(BaseModel):
+    area_id: Optional[int] = None
+    names: Optional[list[str]] = None
+    create_racks: bool = False
+
+
+class VisionLayoutAcceptOut(BaseModel):
+    created: list[RowOut] = []
+    existing: list[RowOut] = []
+    racks_created: list[RackOut] = []
+    racks_existing: list[RackOut] = []
