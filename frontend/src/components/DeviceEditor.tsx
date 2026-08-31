@@ -55,7 +55,7 @@ export function emptyDraft(rackId?: number | ""): DeviceDraft {
     serial: "",
     asset_tag: "",
     owner: "",
-    device_type: "server",
+    device_type: "",
     function: "",
     rack_id: rackId ?? "",
     ru_start: 1,
@@ -91,7 +91,7 @@ export function draftFromDevice(d: Device): DeviceDraft {
     serial: d.serial || "",
     asset_tag: d.asset_tag || "",
     owner: d.owner || "",
-    device_type: d.device_type || "server",
+    device_type: d.device_type || "",
     function: d.function || "",
     rack_id: d.rack_id || "",
     ru_start: start,
@@ -157,12 +157,16 @@ function Combo({
   value,
   onChange,
   onCommit,
+  allowEmpty = false,
+  emptyLabel = "Unspecified",
 }: {
   label: string;
   options: string[];
   value: string;
   onChange: (v: string) => void;
   onCommit?: (v: string) => void;
+  allowEmpty?: boolean;
+  emptyLabel?: string;
 }) {
   const unique = Array.from(new Set(options.filter((o) => o && o.toLowerCase() !== OTHER.toLowerCase())));
   if (value && value.toLowerCase() !== OTHER.toLowerCase() && !unique.some((o) => o.toLowerCase() === value.toLowerCase())) {
@@ -174,12 +178,13 @@ function Combo({
   const needle = (open ? filter : "").trim().toLowerCase();
   const shown = needle ? unique.filter((o) => o.toLowerCase().includes(needle)) : unique;
   const isNew = Boolean(typed) && !unique.some((o) => o.toLowerCase() === typed.toLowerCase());
+  const showEmpty = allowEmpty && !needle;
 
   function pick(next: string) {
     onChange(next);
     setOpen(false);
     setFilter("");
-    if (next) onCommit?.(next);
+    if (next || allowEmpty) onCommit?.(next);
   }
 
   return (
@@ -188,7 +193,7 @@ function Combo({
       <div className="combo">
         <input
           value={open ? filter : value}
-          placeholder="Type to search or add a new value"
+          placeholder={allowEmpty ? emptyLabel : "Type to search or add a new value"}
           autoComplete="off"
           onFocus={() => {
             setFilter(value);
@@ -202,11 +207,16 @@ function Combo({
           onBlur={() => {
             window.setTimeout(() => setOpen(false), 180);
             const next = typed;
-            if (next) onCommit?.(next);
+            if (next || allowEmpty) onCommit?.(next);
           }}
         />
         {open && (
           <div className="combo-list">
+            {showEmpty && (
+              <button type="button" className="combo-empty" onMouseDown={(e) => { e.preventDefault(); pick(""); }}>
+                {emptyLabel}
+              </button>
+            )}
             {shown.slice(0, 40).map((o) => (
               <button type="button" key={o} onMouseDown={(e) => { e.preventDefault(); pick(o); }}>
                 {o}
@@ -217,7 +227,7 @@ function Combo({
                 Add “{typed}” for next time
               </button>
             )}
-            {!shown.length && !isNew && <div className="muted" style={{ padding: 8 }}>No matches</div>}
+            {!shown.length && !isNew && !showEmpty && <div className="muted" style={{ padding: 8 }}>No matches</div>}
           </div>
         )}
       </div>
@@ -491,6 +501,7 @@ export function DeviceFields({
       <div className="row three">
         <Combo
           label="Type"
+          allowEmpty
           options={catalog?.device_types ?? ["server", "switch", "router", "firewall", "other"]}
           value={value.device_type}
           onChange={(device_type) => set({ device_type })}

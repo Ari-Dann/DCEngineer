@@ -766,7 +766,7 @@ def accept_proposal(
         serial=row.serial or "",
         asset_tag=row.asset_tag or "",
         owner=row.owner or "",
-        device_type=row.device_type or "server",
+        device_type=row.device_type or "",
         function=row.function or "",
         ru_start=row.ru_start,
         ru_end=row.ru_end,

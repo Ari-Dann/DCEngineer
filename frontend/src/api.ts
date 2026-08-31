@@ -238,6 +238,7 @@ export const projects = {
     api<Checklist>(`/api/projects/${pid}/checklists/${cid}`, { method: "PATCH", body: JSON.stringify(body) }),
   exportUrl: (id: number) => `/api/projects/${id}/export.xlsx`,
   exportVisioUrl: (id: number) => `/api/projects/${id}/export-visio.zip`,
+  exportNetboxUrl: (id: number) => `/api/projects/${id}/export-netbox.zip`,
 };
 
 export const ops = {

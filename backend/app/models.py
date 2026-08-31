@@ -134,7 +134,7 @@ class Device(Base):
     serial: Mapped[str] = mapped_column(String(128), default="", index=True)
     asset_tag: Mapped[str] = mapped_column(String(128), default="")
     owner: Mapped[str] = mapped_column(String(255), default="", index=True)
-    device_type: Mapped[str] = mapped_column(String(64), default="server", index=True)
+    device_type: Mapped[str] = mapped_column(String(64), default="", index=True)
     function: Mapped[str] = mapped_column(String(255), default="")
     ru_start: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     ru_end: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

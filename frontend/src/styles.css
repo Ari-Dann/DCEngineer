@@ -286,6 +286,7 @@ tr.clickable { cursor: pointer; }
 }
 .combo-list button:hover, .combo-list button:focus { background: var(--bg-hover); }
 .combo-list .combo-add { color: var(--accent-2); font-weight: 650; }
+.combo-list .combo-empty { color: var(--muted); font-style: italic; }
 .camera-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
 .viewfinder {
   position: relative;

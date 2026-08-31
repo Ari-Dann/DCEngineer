@@ -238,9 +238,11 @@ Hall A,Row 2,,,
 Hall A,Row 3,A03,,,
 ```
 
-If the sheet contains **Area** and **Row/Aisle** columns, the import creates that layout and fills the area even when some lines have no device. Matching follows **Area → Row → Rack → Device**: a row is matched only inside its area, a rack only inside that row (or an unassigned rack in the same area), and a device serial that already lives in a different rack is left in place rather than moved. Empty or “unknown” cells do not blank fields that are already filled. Missing rack names are created (default 42U, grown if the RU is higher). Devices with no rack stay **unlocated** until you assign them under **Locate** or Capture.
+If the sheet contains **Area** and **Row/Aisle** columns, the import creates that layout and fills the area even when some lines have no device. Matching follows **Area → Row → Rack → Device**: a row is matched only inside its area, a rack only inside that row (or an unassigned rack in the same area), and a device serial that already lives in a different rack is left in place rather than moved. Empty or “unknown” cells do not blank fields that are already filled. Missing rack names are created (default 42U, grown if the RU is higher). Devices with no rack stay **unlocated** until you assign them under **Locate** or Capture. New devices default to a **blank type** (not `server`); choose a type when you know it.
 
 Workbooks with several sheets import **one sheet by default** (the Devices sheet in an RBI export). Check **Import every sheet** to load the entire file. A sheet named Hall A or Row 1 is used as the area (or as the row when a default area is set) unless the name is generic (`Devices`, `Cover`, `Inventory`, `Sheet1`, …).
+
+**NetBox:** a devices CSV that uses NetBox import headers (`site`, `role`, `manufacturer`, `device_type`, `position`, …) is detected automatically. `role` maps to type, `manufacturer` to vendor, `device_type` to model, `location` to area (nested `Area / Row` names also fill the row), `position` to RU start, and `tenant` to owner. You can also import the `devices.csv` from a DCEngineer NetBox ZIP.
 
 Only an **Admin** can rename or delete an entire project.
 
@@ -290,6 +292,14 @@ API docs: `https://${DCE_HOSTNAME}/docs`.
 ## RBI Excel export
 
 Project page → **Export RBI workbook**. Sheets: Cover, Revision Control, Racks, Elevations, Devices, PDU Connectivity, Cabling, Lifecycle, Remediation, Handoffs. Near-EOL window is `NEAR_EOL_DAYS` (default 365). Rack SVG: project → rack → **Download SVG layout**.
+
+## NetBox import / export
+
+Project page → **Export for NetBox** downloads a ZIP of lowercase-header CSVs plus `device-types.yaml`, shaped for NetBox DCIM import (not a live API client).
+
+Import order in NetBox: **Sites → Locations → Manufacturers → Device Types (YAML) → Device Roles → Racks → Devices**. Areas export as locations; rows export as child locations named `Area / Row`. Device type in DCEngineer is NetBox **role**; vendor/model are manufacturer/device type; owner is tenant; RU start is position. Devices with no type export the role `unspecified`.
+
+To load a NetBox devices CSV back into DCEngineer, use Project → Devices → Import (or drop the whole ZIP). Header detection maps NetBox columns onto DCEngineer fields.
 
 ---
 

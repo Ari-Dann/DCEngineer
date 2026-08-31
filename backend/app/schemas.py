@@ -170,7 +170,7 @@ class DeviceIn(BaseModel):
     serial: str = ""
     asset_tag: str = ""
     owner: str = ""
-    device_type: str = "server"
+    device_type: str = ""
     function: str = ""
     ru_start: Optional[int] = Field(default=None, ge=1, le=70)
     ru_end: Optional[int] = Field(default=None, ge=1, le=70)
