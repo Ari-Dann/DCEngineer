@@ -1254,7 +1254,7 @@ def test_import_parses_device_name_into_blank_identity_fields(client, auth):
     unk = devices["SN-UNK"]
     assert unk["vendor"] == ""
     assert unk["model"] == ""
-    assert unk["device_type"] == "server"
+    assert unk["device_type"] == ""
     known = devices["SN-9300"]
     assert known["vendor"] == "Cisco"
     assert known["model"] == "Catalyst 9300-48P"
@@ -1640,6 +1640,149 @@ def test_bulk_create_rows_under_area(client, auth):
     listed = client.get(f"/api/projects/{pid}/rows", headers=auth).json()
     assert [r["name"] for r in listed] == ["A01", "A02", "A03", "A04"]
     assert all(r["area_id"] == aid for r in listed)
+
+
+def test_new_device_type_defaults_blank(client, auth):
+    project = client.post("/api/projects", headers=auth, json={"name": "Blank type"}).json()
+    pid = project["id"]
+    device = client.post(f"/api/projects/{pid}/devices", headers=auth, json={"name": "new-box"}).json()
+    assert device["device_type"] == ""
+    listed = client.get(f"/api/projects/{pid}/devices", headers=auth).json()
+    assert listed[0]["device_type"] == ""
+
+
+def test_import_netbox_devices_csv_maps_role_and_hardware(client, auth):
+    project = client.post("/api/projects", headers=auth, json={"name": "NetBox in", "site_name": "DC1"}).json()
+    pid = project["id"]
+    csv_body = (
+        "name,role,tenant,manufacturer,device_type,serial,asset_tag,status,site,location,rack,position,face,comments\n"
+        "core-sw,switch,Acme Colo,Cisco,Catalyst 9300-48P,SN-NB,AT-1,active,DC1,Hall A / Row 1,R05,42,front,core pair\n"
+        "mystery-box,,,,,,active,DC1,Hall A / Row 1,R05,1,,\n"
+    )
+    imported = client.post(
+        f"/api/projects/{pid}/import",
+        headers=auth,
+        files={"file": ("devices.csv", csv_body.encode(), "text/csv")},
+    )
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["created"] == 2
+    areas = {a["name"]: a for a in client.get(f"/api/projects/{pid}/areas", headers=auth).json()}
+    assert "Hall A" in areas
+    rows = {r["name"]: r for r in client.get(f"/api/projects/{pid}/rows", headers=auth).json()}
+    assert "Row 1" in rows
+    assert rows["Row 1"]["area_id"] == areas["Hall A"]["id"]
+    racks = {r["name"]: r for r in client.get(f"/api/projects/{pid}/racks", headers=auth).json()}
+    assert "R05" in racks
+    devices = {d["name"]: d for d in client.get(f"/api/projects/{pid}/devices", headers=auth).json()}
+    core = devices["core-sw"]
+    assert core["device_type"] == "switch"
+    assert core["vendor"] == "Cisco"
+    assert core["model"] == "Catalyst 9300-48P"
+    assert core["ru_start"] == 42
+    assert core["owner"] == "Acme Colo"
+    assert core["notes"] == "core pair"
+    assert core["serial"] == "SN-NB"
+    assert core["asset_tag"] == "AT-1"
+    assert core["function"] == ""
+    assert core["rack_id"] == racks["R05"]["id"]
+    mystery = devices["mystery-box"]
+    assert mystery["device_type"] == ""
+    assert mystery["vendor"] == ""
+    assert mystery["model"] == ""
+
+
+def test_netbox_export_zip_roundtrip(client, auth):
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    src = client.post(
+        "/api/projects",
+        headers=auth,
+        json={"name": "NB src", "site_name": "DC1", "customer": "Acme"},
+    ).json()
+    pid = src["id"]
+    area = client.post(f"/api/projects/{pid}/areas", headers=auth, json={"name": "Hall A"}).json()
+    row = client.post(f"/api/projects/{pid}/rows", headers=auth, json={"name": "Row 1", "area_id": area["id"]}).json()
+    rack = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "R05", "area_id": area["id"], "row_id": row["id"], "ru_height": 42},
+    ).json()
+    client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={
+            "name": "core-sw",
+            "rack_id": rack["id"],
+            "vendor": "Cisco",
+            "model": "Catalyst 9300-48P",
+            "serial": "SN-NBX",
+            "owner": "Acme Colo",
+            "device_type": "switch",
+            "ru_start": 42,
+            "ru_end": 42,
+            "notes": "core pair",
+        },
+    )
+    client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={"name": "mystery-box", "rack_id": rack["id"], "serial": "SN-BLANK", "ru_start": 1, "ru_end": 1},
+    )
+
+    exported = client.get(f"/api/projects/{pid}/export-netbox.zip", headers=auth)
+    assert exported.status_code == 200, exported.text
+    assert exported.content[:2] == b"PK"
+    zf = ZipFile(BytesIO(exported.content))
+    names = set(zf.namelist())
+    assert names >= {
+        "README.txt",
+        "sites.csv",
+        "locations.csv",
+        "racks.csv",
+        "device-roles.csv",
+        "manufacturers.csv",
+        "devices.csv",
+        "device-types.yaml",
+    }
+    devices_csv = zf.read("devices.csv").decode()
+    header = devices_csv.splitlines()[0]
+    assert header == "name,role,manufacturer,device_type,site,location,rack,position,serial,asset_tag,status,tenant,comments"
+    assert "Hall A / Row 1" in devices_csv
+    assert "switch" in devices_csv
+    assert "unspecified" in devices_csv
+    yaml_text = zf.read("device-types.yaml").decode()
+    assert "manufacturer: Cisco" in yaml_text
+    assert "model: Catalyst 9300-48P" in yaml_text
+    locations = zf.read("locations.csv").decode()
+    assert "Hall A" in locations
+    assert "Hall A / Row 1" in locations
+
+    dest = client.post("/api/projects", headers=auth, json={"name": "NB dest", "site_name": "DC1"}).json()
+    dest_id = dest["id"]
+    imported = client.post(
+        f"/api/projects/{dest_id}/import",
+        headers=auth,
+        files={"file": ("site-NetBox.zip", exported.content, "application/zip")},
+    )
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["created"] >= 2
+    got = {d["serial"]: d for d in client.get(f"/api/projects/{dest_id}/devices", headers=auth).json()}
+    core = got["SN-NBX"]
+    assert core["device_type"] == "switch"
+    assert core["vendor"] == "Cisco"
+    assert core["model"] == "Catalyst 9300-48P"
+    assert core["ru_start"] == 42
+    assert core["owner"] == "Acme Colo"
+    blank = got["SN-BLANK"]
+    assert blank["device_type"] == ""
+    dest_areas = {a["name"] for a in client.get(f"/api/projects/{dest_id}/areas", headers=auth).json()}
+    dest_rows = {r["name"] for r in client.get(f"/api/projects/{dest_id}/rows", headers=auth).json()}
+    dest_racks = {r["name"] for r in client.get(f"/api/projects/{dest_id}/racks", headers=auth).json()}
+    assert "Hall A" in dest_areas
+    assert "Row 1" in dest_rows
+    assert "R05" in dest_racks
+
 
 
 

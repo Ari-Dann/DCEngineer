@@ -1,4 +1,11 @@
-from app.importer import apply_location, known_field, parse_location
+from app.importer import (
+    apply_location,
+    apply_netbox_location,
+    known_field,
+    looks_like_netbox,
+    parse_location,
+    suggest_mapping,
+)
 
 
 def test_parse_location_a12_r09_ru19():
@@ -51,3 +58,54 @@ def test_location_and_owner_headers_are_recognized():
     assert known_field("Physical Location") == "location"
     assert known_field("Owner") == "owner"
     assert known_field("Client") == "owner"
+
+
+def test_generic_role_header_maps_to_function_not_type():
+    assert known_field("role") == "function"
+    mapping = suggest_mapping(["name", "role", "rack"])
+    assert mapping["function"] == 1
+    assert "device_type" not in mapping
+    assert not looks_like_netbox(["name", "role", "rack"])
+
+
+def test_netbox_headers_remap_role_manufacturer_device_type_location():
+    headers = [
+        "name",
+        "role",
+        "tenant",
+        "manufacturer",
+        "device_type",
+        "serial",
+        "asset_tag",
+        "status",
+        "site",
+        "location",
+        "rack",
+        "position",
+        "face",
+        "comments",
+    ]
+    assert looks_like_netbox(headers)
+    mapping = suggest_mapping(headers)
+    assert mapping["device_type"] == headers.index("role")
+    assert mapping["vendor"] == headers.index("manufacturer")
+    assert mapping["model"] == headers.index("device_type")
+    assert mapping["area"] == headers.index("location")
+    assert mapping["ru_start"] == headers.index("position")
+    assert mapping["owner"] == headers.index("tenant")
+    assert mapping["notes"] == headers.index("comments")
+    assert "function" not in mapping
+    assert "location" not in mapping
+
+
+def test_apply_netbox_location_splits_nested_area_row():
+    nested = apply_netbox_location({"location": "Hall A / Row 1", "name": "sw-1"})
+    assert nested["area"] == "Hall A"
+    assert nested["row"] == "Row 1"
+    from_area = apply_netbox_location({"area": "Hall A / Row 1", "name": "sw-1"})
+    assert from_area["area"] == "Hall A"
+    assert from_area["row"] == "Row 1"
+    room = apply_netbox_location({"location": "Cage 7", "name": "sw-1"})
+    assert room["area"] == "Cage 7"
+    assert not room.get("row")
+

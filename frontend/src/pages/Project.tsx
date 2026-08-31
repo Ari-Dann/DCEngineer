@@ -307,6 +307,12 @@ export default function Project() {
           >
             Export for Visio / Office
           </button>
+          <button
+            className="btn"
+            onClick={() => downloadAuth(projects.exportNetboxUrl(pid), `${project.name}-NetBox.zip`)}
+          >
+            Export for NetBox
+          </button>
         </div>
       </div>
       {error && <div className="error">{error}</div>}

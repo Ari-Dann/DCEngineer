@@ -2,9 +2,11 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
+from app.backup import run_backup
 from app.config import get_settings
 from app.database import get_db
 from app.deps import WriteUser, get_current_user
+from app.media_paths import hierarchy_key
 from app.models import (
     AppBackup,
     Area,
@@ -18,12 +20,11 @@ from app.models import (
     User,
     WorkOrder,
 )
+from app.netbox_export import build_netbox_zip
 from app.office_export import build_office_zip
 from app.rbi_export import build_rbi_workbook, eol_status, rack_svg
 from app.schemas import AttachmentOut, CatalogLearnIn
-from app.media_paths import hierarchy_key
 from app.storage import get_storage
-from app.backup import run_backup
 
 files_router = APIRouter(prefix="/api", tags=["files"])
 meta_router = APIRouter(prefix="/api", tags=["meta"])
@@ -122,6 +123,21 @@ def export_visio_office(project_id: int, db: Session = Depends(get_db), _: User 
     data = build_office_zip(db, project)
     stem = (project.site_name or project.customer or project.name or "DCEngineer").replace(" ", "_")
     filename = f"{stem}-Visio-Office.zip"
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@meta_router.get("/projects/{project_id}/export-netbox.zip")
+def export_netbox(project_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    data = build_netbox_zip(db, project)
+    stem = (project.site_name or project.customer or project.name or "DCEngineer").replace(" ", "_")
+    filename = f"{stem}-NetBox.zip"
     return Response(
         content=data,
         media_type="application/zip",

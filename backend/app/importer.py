@@ -51,8 +51,45 @@ HEADER_MAP = {
     "indicator_color": ("led color", "screen color", "indicator color", "color", "light color"),
 }
 
+# NetBox device CSV uses the same words for different fields (role = device role,
+# device_type = hardware model, location = DCIM location). Detected separately.
+NETBOX_HEADER_MAP = {
+    "name": ("name", "device", "device name", "device_name"),
+    "hostname": ("hostname", "host", "dns", "fqdn"),
+    "model": ("device type", "device_type", "model", "part"),
+    "device_type": ("role", "device role", "device_role", "type"),
+    "vendor": ("manufacturer", "vendor", "oem", "make", "mfg"),
+    "serial": ("serial", "serial number", "serial_number", "sn"),
+    "asset_tag": ("asset tag", "asset_tag", "asset"),
+    "owner": ("tenant", "owner", "client"),
+    "area": ("location", "area", "hall", "cage", "room"),
+    "row": ("row", "aisle", "row name", "parent location"),
+    "rack": ("rack", "rack name", "rack_name", "cabinet"),
+    "ru_start": ("position", "ru start", "ru_start", "u", "u start"),
+    "ru_end": ("ru end", "ru_end", "u end"),
+    "ru_height": ("u height", "u_height", "height", "ru height"),
+    "notes": ("comments", "comment", "description", "notes"),
+}
+
 KNOWN_FIELDS = {f["id"] for f in IMPORT_FIELDS}
 PREFERRED_SHEETS = ("devices", "device list", "inventory", "assets", "equipment", "elevations")
+_NON_DEVICE_SHEETS = {
+    "sites",
+    "locations",
+    "manufacturers",
+    "device-roles",
+    "device roles",
+    "device-types",
+    "readme",
+    "cover",
+    "revision control",
+    "pdu connectivity",
+    "cabling",
+    "lifecycle",
+    "remediation",
+    "handoffs",
+    "layout",
+}
 GENERIC_SHEET_NAMES = {
     *PREFERRED_SHEETS,
     "cover",
@@ -67,9 +104,17 @@ GENERIC_SHEET_NAMES = {
     "sheet1",
     "sheet2",
     "sheet3",
+    "sites",
+    "locations",
+    "manufacturers",
+    "device-roles",
+    "device roles",
+    "device-types",
+    "readme",
+    "readme.txt",
 }
 KNOWN_TYPES = {t.lower() for t in DEVICE_TYPES}
-_BLANK_TEXT = {"", "unknown", "n/a", "na", "none", "-"}
+_BLANK_TEXT = {"", "unknown", "n/a", "na", "none", "-", "unspecified"}
 _LOCATION_LAYOUT_FIELDS = ("row", "rack", "ru_start", "ru_end")
 
 # "A12 R09-RU19" → row A12, rack 09, RU 19. Also accepts dashes, slashes, and "Row/Rack/RU" words.
@@ -116,20 +161,39 @@ def _label_key(cell: Any) -> str:
     return re.sub(r"[^a-z0-9]+", " ", text).strip()
 
 
-def known_field(cell: Any) -> str | None:
+def looks_like_netbox(headers: list[str]) -> bool:
+    """True when headers match a NetBox device CSV (not our RBI / inventory layout)."""
+    keys = {_label_key(h) for h in headers if _label_key(h)}
+    has_site = "site" in keys
+    has_role = bool(keys & {"role", "device role", "device_role"})
+    has_hw = bool(keys & {"manufacturer", "device type", "device_type"})
+    has_place = bool(keys & {"position", "rack"})
+    return has_site and has_role and has_hw and has_place
+
+
+def header_map_for(headers: list[str]) -> dict[str, tuple[str, ...]]:
+    return NETBOX_HEADER_MAP if looks_like_netbox(headers) else HEADER_MAP
+
+
+def known_field(cell: Any, table: dict[str, tuple[str, ...]] | None = None, *, aliases_only: bool = False) -> str | None:
     text = _label_key(cell)
     if not text:
         return None
-    for field, aliases in HEADER_MAP.items():
-        if text == field.replace("_", " ") or text in aliases:
+    table = table or HEADER_MAP
+    for field, aliases in table.items():
+        if text in aliases:
+            return field
+        if not aliases_only and text == field.replace("_", " "):
             return field
     return None
 
 
 def _mapped_count(cells: list[str]) -> int:
+    table = header_map_for(cells)
+    aliases_only = table is NETBOX_HEADER_MAP
     seen: set[str] = set()
     for cell in cells:
-        field = known_field(cell)
+        field = known_field(cell, table, aliases_only=aliases_only)
         if field:
             seen.add(field)
     return len(seen)
@@ -209,6 +273,31 @@ def _sheets_from_ods(data: bytes) -> list[tuple[str, list[list[str]]]]:
     return out
 
 
+def _csv_sheets_from_zip(data: bytes) -> list[tuple[str, list[list[str]]]] | None:
+    """NetBox-style ZIP of CSVs (devices.csv, racks.csv, …). None if this is an xlsx/ods."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            names = zf.namelist()
+            if "mimetype" in names or "[Content_Types].xml" in names:
+                return None
+            csv_names = [
+                n
+                for n in names
+                if n.lower().endswith(".csv") and not n.split("/")[-1].startswith(".") and not n.endswith("/")
+            ]
+            if not csv_names:
+                return None
+            out: list[tuple[str, list[list[str]]]] = []
+            for path in csv_names:
+                raw = zf.read(path)
+                stem = path.split("/")[-1]
+                title = stem.rsplit(".", 1)[0]
+                out.append((title, _grid_from_csv(raw)))
+            return out
+    except zipfile.BadZipFile:
+        return None
+
+
 def parse_workbook(filename: str, data: bytes) -> list[tuple[str, list[list[str]]]]:
     name = (filename or "").lower()
     if name.endswith(".xls"):
@@ -220,6 +309,10 @@ def parse_workbook(filename: str, data: bytes) -> list[tuple[str, list[list[str]
         if not sheets:
             raise ValueError("ODS workbook contained no tables.")
         return sheets
+    if name.endswith(".zip") or data[:2] == b"PK":
+        csv_sheets = _csv_sheets_from_zip(data)
+        if csv_sheets:
+            return csv_sheets
     if name.endswith(".xlsx") or data[:2] == b"PK":
         return _sheets_from_xlsx(data)
     return [(filename or "Sheet1", _grid_from_csv(data))]
@@ -251,9 +344,11 @@ def detect_orientation(grid: list[list[str]]) -> str:
 
 
 def suggest_mapping(headers: list[str]) -> dict[str, int]:
+    table = header_map_for(headers)
+    aliases_only = table is NETBOX_HEADER_MAP
     mapping: dict[str, int] = {}
     for index, header in enumerate(headers):
-        field = known_field(header)
+        field = known_field(header, table, aliases_only=aliases_only)
         if field and field not in mapping:
             mapping[field] = index
     return mapping
@@ -280,12 +375,13 @@ def records_from_grid(
 ) -> list[dict[str, str]]:
     headers = _headers_for(grid, orientation, header_index)
     used = mapping if mapping is not None else suggest_mapping(headers)
+    netbox = looks_like_netbox(headers)
     records: list[dict[str, str]] = []
     if orientation == "rows":
         for row in grid[header_index + 1 :]:
             rec = {field: (row[idx] if idx < len(row) else "") for field, idx in used.items()}
             if any(_norm(v) for v in rec.values()):
-                records.append(apply_location(rec))
+                records.append(apply_netbox_location(rec) if netbox else apply_location(rec))
         return records
     width = max((len(r) for r in grid), default=0)
     for col in range(header_index + 1, width):
@@ -294,7 +390,7 @@ def records_from_grid(
             row = grid[row_idx] if row_idx < len(grid) else []
             rec[field] = row[col] if col < len(row) else ""
         if any(_norm(v) for v in rec.values()):
-            records.append(apply_location(rec))
+            records.append(apply_netbox_location(rec) if netbox else apply_location(rec))
     return records
 
 
@@ -415,6 +511,34 @@ def apply_location(record: dict[str, str]) -> dict[str, str]:
     return record
 
 
+def _split_nested_location(value: str) -> tuple[str, str]:
+    text = _norm(value)
+    if "/" not in text:
+        return text, ""
+    parent, child = text.rsplit("/", 1)
+    parent, child = parent.strip(), child.strip()
+    if parent and child:
+        return parent, child
+    return text, ""
+
+
+def apply_netbox_location(record: dict[str, str]) -> dict[str, str]:
+    """Map a NetBox DCIM location onto area / row. Nested names use 'Area / Row'."""
+    area = (record.get("area") or "").strip()
+    row = (record.get("row") or "").strip()
+    loc = (record.get("location") or "").strip()
+    source = loc or area
+    parent, child = _split_nested_location(source)
+    if child:
+        record["area"] = parent
+        if not row:
+            record["row"] = child
+        return record
+    if loc and not area:
+        record["area"] = loc
+    return record
+
+
 def _int(value: str) -> int | None:
     if not value:
         return None
@@ -427,7 +551,7 @@ def _int(value: str) -> int | None:
 def _normalize_type(value: str) -> str:
     text = (value or "").strip()
     if not text:
-        return "server"
+        return ""
     lower = text.lower()
     if lower in KNOWN_TYPES:
         return lower
@@ -757,6 +881,8 @@ def import_devices(
     sheet_names: list[str] = []
 
     for sheet_name, grid in targets:
+        if all_sheets and (sheet_name or "").lower().strip() in _NON_DEVICE_SHEETS:
+            continue
         sheet_orientation = orientation if (not all_sheets or sheet_name == chosen) else None
         sheet_orientation = sheet_orientation or detect_orientation(grid)
         sheet_header = header_index if (not all_sheets or sheet_name == chosen) else None
@@ -840,7 +966,7 @@ def import_devices(
                         model="",
                         asset_tag="",
                         owner="",
-                        device_type="server",
+                        device_type="",
                         function="",
                         management_ip="",
                         notes="",
