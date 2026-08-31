@@ -1,8 +1,6 @@
 import { FormEvent, useState } from "react";
 import { AisleRow, Area, Project, Rack, projects } from "../api";
 import AiImageParse, { EntryMode, EntryModeRadios } from "./AiImageParse";
-import RestrictionPicker from "./RestrictionPicker";
-import { inheritedPhotoBlockers, restrictionFields, type RestrictionType } from "../restriction";
 
 function parseNames(raw: string) {
   return raw
@@ -36,7 +34,6 @@ export default function CreateRowsPanel({
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
-  const [restriction, setRestriction] = useState<RestrictionType>("");
 
   const rowsHere = areaId ? rows.filter((r) => r.area_id === areaId) : rows;
 
@@ -55,13 +52,8 @@ export default function CreateRowsPanel({
     }
     setBusy(true);
     try {
-      const result = await projects.addRows(projectId, {
-        area_id: Number(areaId),
-        names: list,
-        ...restrictionFields(restriction),
-      });
+      const result = await projects.addRows(projectId, { area_id: Number(areaId), names: list });
       setNames("");
-      setRestriction("");
       const created = result.created.map((r) => r.name);
       const existing = result.existing.map((r) => r.name);
       setMsg(
@@ -81,7 +73,7 @@ export default function CreateRowsPanel({
     <div className="card" style={{ marginTop: 16 }}>
       <h3>Rows</h3>
       <p>
-        Area → <strong>Row</strong> → Rack. Create the aisle set for this area, then pick a row for rack capture.
+        Area → <strong>Row</strong> → Rack. Create the aisle set for this area, then tag individual rows as government / EMSS if needed.
       </p>
       {error && <div className="error">{error}</div>}
       {msg && <div className="success">{msg}</div>}
@@ -103,15 +95,6 @@ export default function CreateRowsPanel({
             <span>Row names (one per line)</span>
             <textarea value={names} onChange={(e) => setNames(e.target.value)} placeholder={"A01\nA02\nA03"} rows={5} />
           </label>
-          <RestrictionPicker
-            name="capture-row-restriction"
-            value={restriction}
-            onChange={setRestriction}
-            inherited={inheritedPhotoBlockers({
-              project,
-              area: areas.find((a) => a.id === areaId) || null,
-            })}
-          />
           <button className="btn primary" disabled={busy || !areaId}>
             {busy ? "Creating…" : "Create rows"}
           </button>

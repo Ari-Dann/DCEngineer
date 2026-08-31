@@ -102,6 +102,7 @@ export default function Projects() {
           <label className="field"><span>Data handling</span><textarea value={form.data_handling_rules} onChange={(e) => set("data_handling_rules", e.target.value)} /></label>
           <RestrictionPicker
             name="new-project-restriction"
+            noun="project"
             value={restrictionTypeOf(form)}
             onChange={(type: RestrictionType) => setForm({ ...form, ...restrictionFields(type) })}
           />

@@ -14,7 +14,7 @@ import {
 } from "../api";
 import CameraModal from "./CameraModal";
 import VideoRecorder from "./VideoRecorder";
-import { inheritedPhotoBlockers } from "../restriction";
+import { photosAllowed } from "../restriction";
 
 export type EntryMode = "manual" | "ai";
 export type ParseTarget = "area" | "row" | "rack" | "device";
@@ -218,12 +218,12 @@ export default function AiImageParse({
   const selectedArea = areaId ? areas.find((a) => a.id === areaId) : undefined;
   const selectedRow = rowId ? rows.find((r) => r.id === rowId) : undefined;
   const selectedRack = rackId ? racks.find((r) => r.id === rackId) : undefined;
-  const blockedHere = inheritedPhotoBlockers({
+  const blockedHere = !photosAllowed({
     project,
-    area: selectedArea,
+    area: selectedRow || selectedRack ? undefined : selectedArea,
     row: selectedRow,
     rack: selectedRack,
-  }).length > 0;
+  });
 
   async function refresh(id?: number) {
     const sid = id || session?.id;

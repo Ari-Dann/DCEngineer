@@ -1845,6 +1845,39 @@ def test_hierarchy_government_emss_tags_block_photos(client, auth):
     assert device["restricted_reason"] == "EMSS"
 
 
+def test_row_emss_tag_does_not_apply_to_sibling_rows(client, auth):
+    project = client.post("/api/projects", headers=auth, json={"name": "Mixed cage"}).json()
+    pid = project["id"]
+    area = client.post(f"/api/projects/{pid}/areas", headers=auth, json={"name": "Area1"}).json()
+    bulk = client.post(
+        f"/api/projects/{pid}/rows/bulk",
+        headers=auth,
+        json={"area_id": area["id"], "names": ["A01", "A04"]},
+    ).json()
+    created = {r["name"]: r for r in bulk["created"]}
+    tagged = client.patch(
+        f"/api/projects/{pid}/rows/{created['A01']['id']}",
+        headers=auth,
+        json={"name": "A01", "restriction_type": "EMSS"},
+    ).json()
+    assert tagged["restriction_type"] == "EMSS"
+    assert tagged["restricted"] is True
+    sibling = client.patch(
+        f"/api/projects/{pid}/rows/{created['A04']['id']}",
+        headers=auth,
+        json={"name": "A04"},
+    ).json()
+    assert sibling["name"] == "A04"
+    assert sibling["restricted"] is False
+    assert sibling["restriction_type"] == ""
+    assert sibling["photography_allowed"] is True
+    listed = {r["name"]: r for r in client.get(f"/api/projects/{pid}/rows", headers=auth).json()}
+    assert listed["A01"]["restriction_type"] == "EMSS"
+    assert listed["A04"]["restricted"] is False
+    assert listed["A04"]["restriction_type"] == ""
+
+
+
 
 
 

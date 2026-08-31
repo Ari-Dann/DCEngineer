@@ -15,7 +15,7 @@ import {
 } from "../api";
 import CameraModal from "./CameraModal";
 import VideoRecorder from "./VideoRecorder";
-import { inheritedPhotoBlockers } from "../restriction";
+import { photosAllowed } from "../restriction";
 
 const SHOTS: { id: VisionShotKind; label: string; help: string }[] = [
   { id: "aisle_wide", label: "Aisle / row", help: "Wide shot of the row so the sidecar can read layout." },
@@ -73,13 +73,12 @@ export default function VisionAssist({
   const selectedArea = areaId ? areas.find((a) => a.id === areaId) : undefined;
   const selectedRow = rowId ? rows.find((r) => r.id === rowId) : undefined;
   const selectedRack = rackId ? racks.find((r) => r.id === rackId) : undefined;
-  const blockedHere =
-    inheritedPhotoBlockers({
-      project,
-      area: selectedArea,
-      row: selectedRow,
-      rack: selectedRack,
-    }).length > 0;
+  const blockedHere = !photosAllowed({
+    project,
+    area: selectedRow || selectedRack ? undefined : selectedArea,
+    row: selectedRow,
+    rack: selectedRack,
+  });
   const layoutMode = purpose === "layout";
 
   async function reload() {
