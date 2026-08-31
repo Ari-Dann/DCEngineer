@@ -253,7 +253,26 @@ tr:hover td { background: var(--bg-hover); }
   outline: 2px solid var(--warn);
   background: color-mix(in srgb, var(--warn) 16%, var(--bg-elev));
 }
-@media (max-width: 700px) { .restriction-choices { grid-template-columns: 1fr; } }
+.restriction-inline {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 0 0 10px 34px;
+}
+.restriction-inline-label { font-size: 0.8rem; margin-right: 4px; }
+.restriction-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin: 0; padding: 6px 10px;
+  border: 1px solid var(--border); border-radius: 999px;
+  cursor: pointer; font-size: 0.8rem; font-weight: 600;
+}
+.restriction-chip input { width: 16px; height: 16px; margin: 0; }
+.restriction-chip.on {
+  outline: 2px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 16%, var(--bg-elev));
+}
+@media (max-width: 700px) {
+  .restriction-choices { grid-template-columns: 1fr; }
+  .restriction-inline { padding-left: 0; }
+}
 
 .select-mode {
   display: flex; gap: 16px; align-items: center; flex-wrap: wrap;

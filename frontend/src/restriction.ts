@@ -31,7 +31,7 @@ export function restrictionTypeOf(entity?: Restrictable | null): RestrictionType
   if (!entity) return "";
   const raw = (entity.restriction_type || entity.restricted_reason || "").trim();
   if (raw === "government" || raw === "EMSS" || raw === "other") return raw;
-  if (entity.restricted || entity.photography_allowed === false) return raw === "" ? "other" : "other";
+  if (entity.restricted || entity.photography_allowed === false) return "other";
   return "";
 }
 
@@ -42,7 +42,6 @@ export function isRestrictedEntity(entity?: Restrictable | null): boolean {
 
 export function inheritedPhotoBlockers(opts: {
   project?: Project | null;
-  area?: Area | null;
   row?: AisleRow | null;
   rack?: Rack | null;
 }): RestrictionHit[] {
@@ -52,7 +51,6 @@ export function inheritedPhotoBlockers(opts: {
     hits.push({ label, type: restrictionTypeOf(entity) || "restricted" });
   };
   push(opts.project, "project");
-  if (opts.area) push(opts.area, `area ${opts.area.name}`);
   if (opts.row) push(opts.row, `row ${opts.row.name}`);
   if (opts.rack) push(opts.rack, `rack ${opts.rack.name}`);
   return hits;
@@ -66,17 +64,17 @@ export function photosAllowed(opts: {
   device?: Restrictable | null;
 }): boolean {
   if (opts.device && isRestrictedEntity(opts.device)) return false;
-  return inheritedPhotoBlockers(opts).length === 0;
+  if (opts.rack && isRestrictedEntity(opts.rack)) return false;
+  if (opts.row && isRestrictedEntity(opts.row)) return false;
+  if (opts.project && isRestrictedEntity(opts.project)) return false;
+  if (!opts.row && !opts.rack && !opts.device && opts.area && isRestrictedEntity(opts.area)) return false;
+  return true;
 }
 
-export function restrictionCaption(entity?: Restrictable | null, inherited: RestrictionHit[] = []): string {
+export function restrictionCaption(entity?: Restrictable | null): string {
   const type = restrictionTypeOf(entity);
   if (type) return `${type} · no photos`;
   if (entity?.restricted) return "restricted · no photos";
   if (entity?.photography_allowed === false) return "photos forbidden";
-  if (inherited.length) {
-    const first = inherited[0];
-    return `via ${first.label} (${first.type}) · no photos`;
-  }
   return "photos OK";
 }

@@ -100,7 +100,11 @@ def hierarchy_reasons(db: Session, session: VisionSession) -> list[str]:
     project, area, row, rack = resolve_session_location(db, session)
     reasons: list[str] = []
     reasons.extend(entity_reasons("Project", project))
-    reasons.extend(entity_reasons("Area", area))
-    reasons.extend(entity_reasons("Row", row))
-    reasons.extend(entity_reasons("Rack", rack))
+    if rack:
+        reasons.extend(entity_reasons("Rack", rack))
+        reasons.extend(entity_reasons("Row", row))
+    elif row:
+        reasons.extend(entity_reasons("Row", row))
+    elif area:
+        reasons.extend(entity_reasons("Area", area))
     return reasons

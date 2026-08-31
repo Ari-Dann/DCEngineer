@@ -571,3 +571,28 @@ def test_restriction_inherits_from_project_row_and_rack(client, auth):
     jobs = client.get("/api/vision/jobs", headers=sidecar).json()
     assert all(j["id"] not in {session["id"], via_row["id"], via_rack["id"]} for j in jobs)
 
+
+def test_restricted_row_does_not_block_sibling_row_analyze(client, auth):
+    project = _project(client, auth, "Sibling Rows")
+    area = _area(client, auth, project["id"], restricted=False)
+    bulk = client.post(
+        f"/api/projects/{project['id']}/rows/bulk",
+        headers=auth,
+        json={"area_id": area["id"], "names": ["A01", "A04"]},
+    ).json()
+    created = {r["name"]: r for r in bulk["created"]}
+    client.patch(
+        f"/api/projects/{project['id']}/rows/{created['A01']['id']}",
+        headers=auth,
+        json={"name": "A01", "restriction_type": "EMSS"},
+    )
+    blocked = _session(client, auth, project["id"], row_id=created["A01"]["id"])
+    _clip(client, auth, blocked["id"])
+    assert client.post(f"/api/vision/sessions/{blocked['id']}/analyze", headers=auth).json()["status"] == "refused"
+    open_row = _session(client, auth, project["id"], row_id=created["A04"]["id"])
+    _clip(client, auth, open_row["id"])
+    allowed = client.post(f"/api/vision/sessions/{open_row['id']}/analyze", headers=auth).json()
+    assert allowed["status"] == "queued"
+    assert allowed["restricted_blocked"] is False
+
+

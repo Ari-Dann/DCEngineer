@@ -248,7 +248,7 @@ Only an **Admin** can rename or delete an entire project.
 
 ### Photos
 
-**Capture photo** uses `getUserMedia` and a canvas JPEG. Files are uploaded as attachments on the current entity (device, rack, row, area, project, inspection, incident, or work order). Multiple photos per device are supported. Tag any level of the hierarchy (project, area, row, rack, or device) as **government / EMSS** to block photography there and on everything inside it.
+**Capture photo** uses `getUserMedia` and a canvas JPEG. Files are uploaded as attachments on the current entity (device, rack, row, area, project, inspection, incident, or work order). Multiple photos per device are supported. Tag a project, area, **individual row**, rack, or device as **government / EMSS** to block photography of that item. Rows in the same area are independent: tagging A01 does not tag A04. Racks and devices inside a tagged row still cannot be photographed.
 
 On the files volume (`STORAGE_LOCAL_PATH`, default `/data/files`) captures are stored as `Project/Area/Axx/Rxx/RUnn/{timestamp}.ext` at the depth you photographed (project, area, row, rack, or device). Unknown levels are omitted — no `Unlocated` or `A00` placeholders.
 
@@ -256,7 +256,7 @@ On the files volume (`STORAGE_LOCAL_PATH`, default `/data/files`) captures are s
 
 On the **Areas**, **Rows**, **Racks**, and **Devices** tabs (and Capture / a rack elevation), choose **AI image parse** to photograph or record video in place. The sidecar returns suggestions; **each field is Confirm / Skip on its own**. Confirming a name writes that area, row, rack, or device; later field confirms patch the same record. Unreadable fields stay blank. Restricted media is never sent to the model.
 
-If a project, area, row, or rack is tagged government / EMSS, photography is forbidden, or a clip is marked photography-restricted, Analyze **refuses** and the sidecar never sends image bytes to the model.
+If the project, the targeted row or rack, or a clip is marked photography-restricted, Analyze **refuses** and the sidecar never sends image bytes to the model. A restricted row does not block analyze on a sibling row in the same area.
 
 Set `BOOTSTRAP_SIDECAR_PASSWORD` / `DCE_SIDECAR_PASSWORD` and a provider key in `.env`. Keys stay in the sidecar container, not the main API.
 
