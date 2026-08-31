@@ -4,6 +4,8 @@ import { ImportResult, Project, getSession, projects } from "../api";
 import ImportWizard from "../components/ImportWizard";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PromptDialog } from "../components/PromptDialog";
+import RestrictionPicker from "../components/RestrictionPicker";
+import { restrictionFields, restrictionTypeOf, type RestrictionType } from "../restriction";
 
 const empty = {
   name: "",
@@ -18,6 +20,9 @@ const empty = {
   photography_rules: "",
   data_handling_rules: "",
   restricted_equipment_notes: "",
+  restricted: false,
+  restriction_type: "",
+  photography_allowed: true,
   in_scope_summary: "",
   discovery_port_access: "unknown",
   discovery_cdp_lldp: "unknown",
@@ -95,7 +100,12 @@ export default function Projects() {
           <label className="field"><span>Badging</span><textarea value={form.badging_notes} onChange={(e) => set("badging_notes", e.target.value)} /></label>
           <label className="field"><span>Photography rules</span><textarea value={form.photography_rules} onChange={(e) => set("photography_rules", e.target.value)} /></label>
           <label className="field"><span>Data handling</span><textarea value={form.data_handling_rules} onChange={(e) => set("data_handling_rules", e.target.value)} /></label>
-          <label className="field"><span>Restricted (government / EMSS)</span><textarea value={form.restricted_equipment_notes} onChange={(e) => set("restricted_equipment_notes", e.target.value)} /></label>
+          <RestrictionPicker
+            name="new-project-restriction"
+            value={restrictionTypeOf(form)}
+            onChange={(type: RestrictionType) => setForm({ ...form, ...restrictionFields(type) })}
+          />
+          <label className="field"><span>Restricted equipment notes</span><textarea value={form.restricted_equipment_notes} onChange={(e) => set("restricted_equipment_notes", e.target.value)} /></label>
           <div className="row three">
             <label className="field"><span>Port access</span>
               <select value={form.discovery_port_access} onChange={(e) => set("discovery_port_access", e.target.value)}>

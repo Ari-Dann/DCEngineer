@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ORMModel(BaseModel):
@@ -53,7 +53,24 @@ class UserUpdate(BaseModel):
     password: Optional[str] = None
 
 
-class ProjectIn(BaseModel):
+class RestrictionMixin(BaseModel):
+    restricted: bool = False
+    restriction_type: str = ""
+    photography_allowed: bool = True
+
+    @model_validator(mode="after")
+    def _sync_restriction(self):
+        kind = (self.restriction_type or "").strip()
+        if kind:
+            self.restricted = True
+            self.restriction_type = kind
+            self.photography_allowed = False
+        elif self.restricted:
+            self.photography_allowed = False
+        return self
+
+
+class ProjectIn(RestrictionMixin):
     name: str
     customer: str = ""
     site_name: str = ""
@@ -89,6 +106,9 @@ class ProjectOut(ORMModel):
     photography_rules: str
     data_handling_rules: str
     restricted_equipment_notes: str
+    restricted: bool
+    restriction_type: str
+    photography_allowed: bool
     in_scope_summary: str
     discovery_port_access: str
     discovery_cdp_lldp: str
@@ -101,13 +121,10 @@ class ProjectOut(ORMModel):
     updated_at: datetime
 
 
-class AreaIn(BaseModel):
+class AreaIn(RestrictionMixin):
     name: str
     description: str = ""
     in_scope: bool = True
-    restricted: bool = False
-    restriction_type: str = ""
-    photography_allowed: bool = True
 
 
 class AreaOut(AreaIn, ORMModel):
@@ -115,7 +132,7 @@ class AreaOut(AreaIn, ORMModel):
     project_id: int
 
 
-class RowIn(BaseModel):
+class RowIn(RestrictionMixin):
     name: str
     area_id: Optional[int] = None
     notes: str = ""
@@ -126,7 +143,7 @@ class RowOut(RowIn, ORMModel):
     project_id: int
 
 
-class RowBulkIn(BaseModel):
+class RowBulkIn(RestrictionMixin):
     area_id: int
     names: list[str]
 
@@ -145,7 +162,7 @@ class RelocateIn(BaseModel):
     include_devices: bool = False
 
 
-class RackIn(BaseModel):
+class RackIn(RestrictionMixin):
     name: str
     area_id: Optional[int] = None
     row_id: Optional[int] = None
@@ -199,6 +216,14 @@ class DeviceIn(BaseModel):
             return "kW"
         return "W"
 
+    @model_validator(mode="after")
+    def _sync_restriction(self):
+        reason = (self.restricted_reason or "").strip()
+        if reason:
+            self.restricted = True
+            self.restricted_reason = reason
+        return self
+
 
 class DevicePatch(BaseModel):
     name: Optional[str] = None
@@ -239,6 +264,12 @@ class DevicePatch(BaseModel):
         if isinstance(value, str) and value.strip().lower() == "kw":
             return "kW"
         return "W"
+
+    @model_validator(mode="after")
+    def _sync_restriction(self):
+        if (self.restricted_reason or "").strip():
+            self.restricted = True
+        return self
 
 
 class DeviceOut(DeviceIn, ORMModel):

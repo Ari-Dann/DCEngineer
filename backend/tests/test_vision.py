@@ -524,3 +524,50 @@ def test_restriction_reasons_from_area(client, auth):
         assert area_row.restricted
     finally:
         db.close()
+
+
+def test_restriction_inherits_from_project_row_and_rack(client, auth):
+    sidecar = _sidecar(client, auth, "vision-sidecar-hierarchy")
+    tagged = _project(client, auth, "Gov Project")
+    client.patch(
+        f"/api/projects/{tagged['id']}",
+        headers=auth,
+        json={"name": tagged["name"], "restriction_type": "government"},
+    )
+    session = _session(client, auth, tagged["id"])
+    _clip(client, auth, session["id"])
+    analyzed = client.post(f"/api/vision/sessions/{session['id']}/analyze", headers=auth)
+    assert analyzed.json()["status"] == "refused"
+    assert analyzed.json()["restricted_blocked"] is True
+
+    project = _project(client, auth, "Open Project")
+    area = _area(client, auth, project["id"], restricted=False)
+    row = client.post(
+        f"/api/projects/{project['id']}/rows",
+        headers=auth,
+        json={"name": "EMSS-ROW", "area_id": area["id"], "restriction_type": "EMSS"},
+    ).json()
+    rack = client.post(
+        f"/api/projects/{project['id']}/racks",
+        headers=auth,
+        json={"name": "R12", "row_id": row["id"], "area_id": area["id"]},
+    ).json()
+    via_row = _session(client, auth, project["id"], row_id=row["id"])
+    _clip(client, auth, via_row["id"])
+    body = client.post(f"/api/vision/sessions/{via_row['id']}/analyze", headers=auth).json()
+    assert body["status"] == "refused"
+    assert any("EMSS" in r or "Row" in r for r in body.get("restriction_reasons", []) + [body.get("error_detail") or ""])
+
+    tagged_rack = client.patch(
+        f"/api/projects/{project['id']}/racks/{rack['id']}",
+        headers=auth,
+        json={"name": rack["name"], "restriction_type": "government"},
+    ).json()
+    assert tagged_rack["restricted"] is True
+    via_rack = _session(client, auth, project["id"], rack_id=rack["id"])
+    _clip(client, auth, via_rack["id"])
+    body = client.post(f"/api/vision/sessions/{via_rack['id']}/analyze", headers=auth).json()
+    assert body["status"] == "refused"
+    jobs = client.get("/api/vision/jobs", headers=sidecar).json()
+    assert all(j["id"] not in {session["id"], via_row["id"], via_rack["id"]} for j in jobs)
+

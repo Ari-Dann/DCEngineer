@@ -4,6 +4,7 @@ import {
   Area,
   AisleRow,
   LayoutAcceptResult,
+  Project,
   Rack,
   VisionClipKind,
   VisionSession,
@@ -14,6 +15,7 @@ import {
 } from "../api";
 import CameraModal from "./CameraModal";
 import VideoRecorder from "./VideoRecorder";
+import { inheritedPhotoBlockers } from "../restriction";
 
 const SHOTS: { id: VisionShotKind; label: string; help: string }[] = [
   { id: "aisle_wide", label: "Aisle / row", help: "Wide shot of the row so the sidecar can read layout." },
@@ -40,6 +42,7 @@ type Props = {
   areas: Area[];
   rows: AisleRow[];
   racks: Rack[];
+  project?: Project | null;
   purpose?: "layout" | "inventory";
   embedded?: boolean;
   onLayoutAccepted?: (result: LayoutAcceptResult) => void;
@@ -53,6 +56,7 @@ export default function VisionAssist({
   areas,
   rows,
   racks,
+  project,
   purpose = "inventory",
   embedded = false,
   onLayoutAccepted,
@@ -67,7 +71,15 @@ export default function VisionAssist({
   const [activeId, setActiveId] = useState<number | null>(null);
 
   const selectedArea = areaId ? areas.find((a) => a.id === areaId) : undefined;
-  const blockedHere = Boolean(selectedArea && (selectedArea.restricted || !selectedArea.photography_allowed));
+  const selectedRow = rowId ? rows.find((r) => r.id === rowId) : undefined;
+  const selectedRack = rackId ? racks.find((r) => r.id === rackId) : undefined;
+  const blockedHere =
+    inheritedPhotoBlockers({
+      project,
+      area: selectedArea,
+      row: selectedRow,
+      rack: selectedRack,
+    }).length > 0;
   const layoutMode = purpose === "layout";
 
   async function reload() {
@@ -177,8 +189,8 @@ export default function VisionAssist({
       )}
       {blockedHere && (
         <div className="banner">
-          This area is restricted or forbids photography. You can still keep evidence on the session, but Analyze will
-          refuse to send images to the model.
+          This location is tagged government / EMSS. Photography is blocked and Analyze will not send images to the
+          model.
         </div>
       )}
       {error && <div className="error">{error}</div>}
@@ -199,19 +211,20 @@ export default function VisionAssist({
         <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. rear of A12, serials on left ear" />
       </label>
       <div className="choice compact">
-        <button type="button" className="btn" disabled={busy} onClick={() => setCam("photo")}>
+        <button type="button" className="btn" disabled={busy || blockedHere} onClick={() => setCam("photo")}>
           Photo
         </button>
-        <button type="button" className="btn" disabled={busy} onClick={() => setCam("video")}>
+        <button type="button" className="btn" disabled={busy || blockedHere} onClick={() => setCam("video")}>
           Video
         </button>
-        <label className="btn" style={{ cursor: "pointer" }}>
+        <label className="btn" style={{ cursor: blockedHere ? "not-allowed" : "pointer" }}>
           Files
           <input
             type="file"
             accept="image/*,video/*"
             multiple
             hidden
+            disabled={busy || blockedHere}
             onChange={async (e) => {
               const files = Array.from(e.target.files || []);
               e.target.value = "";

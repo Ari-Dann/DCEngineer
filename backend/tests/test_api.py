@@ -1784,6 +1784,68 @@ def test_netbox_export_zip_roundtrip(client, auth):
     assert "R05" in dest_racks
 
 
+def test_hierarchy_government_emss_tags_block_photos(client, auth):
+    project = client.post("/api/projects", headers=auth, json={"name": "Gov site", "restriction_type": "government"}).json()
+    pid = project["id"]
+    assert project["restricted"] is True
+    assert project["photography_allowed"] is False
+    assert project["restriction_type"] == "government"
+
+    area = client.post(
+        f"/api/projects/{pid}/areas",
+        headers=auth,
+        json={"name": "Cage 7", "restriction_type": "EMSS"},
+    ).json()
+    assert area["restricted"] is True
+    assert area["photography_allowed"] is False
+    assert area["restriction_type"] == "EMSS"
+
+    rows = client.post(
+        f"/api/projects/{pid}/rows/bulk",
+        headers=auth,
+        json={"area_id": area["id"], "names": ["R1", "R2"], "restriction_type": "government"},
+    ).json()
+    created = {r["name"]: r for r in rows["created"]}
+    assert created["R1"]["restricted"] is True
+    assert created["R1"]["restriction_type"] == "government"
+    assert created["R1"]["photography_allowed"] is False
+
+    rack = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "A01", "row_id": created["R1"]["id"], "restriction_type": "EMSS"},
+    ).json()
+    assert rack["restricted"] is True
+    assert rack["restriction_type"] == "EMSS"
+    assert rack["photography_allowed"] is False
+
+    renamed = client.patch(
+        f"/api/projects/{pid}/rows/{created['R1']['id']}",
+        headers=auth,
+        json={"name": "Row 1"},
+    ).json()
+    assert renamed["name"] == "Row 1"
+    assert renamed["restriction_type"] == "government"
+    assert renamed["restricted"] is True
+
+    cleared = client.patch(
+        f"/api/projects/{pid}/racks/{rack['id']}",
+        headers=auth,
+        json={"name": rack["name"], "restricted": False, "restriction_type": "", "photography_allowed": True},
+    ).json()
+    assert cleared["restricted"] is False
+    assert cleared["photography_allowed"] is True
+
+    device = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={"name": "emss-box", "restricted_reason": "EMSS"},
+    ).json()
+    assert device["restricted"] is True
+    assert device["restricted_reason"] == "EMSS"
+
+
+
 
 
 

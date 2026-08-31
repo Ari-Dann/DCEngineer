@@ -89,6 +89,8 @@ def build_rbi_workbook(db: Session, project: Project) -> bytes:
     cover["A18"] = "Restricted (government / EMSS) equipment"
     cover["A18"].font = Font(bold=True)
     cover["A19"] = project.restricted_equipment_notes
+    if project.restricted or not project.photography_allowed:
+        cover["A20"] = f"Project tagged {project.restriction_type or 'restricted'} — no photos"
     cover["A21"] = "Discovery feasibility"
     cover["A21"].font = Font(bold=True)
     cover["A22"] = f"Port access: {project.discovery_port_access}"
@@ -105,11 +107,23 @@ def build_rbi_workbook(db: Session, project: Project) -> bytes:
 
     racks = db.query(Rack).filter(Rack.project_id == project.id).order_by(Rack.name).all()
     rack_sheet = wb.create_sheet("Racks")
-    _header(rack_sheet, ["Rack", "Row", "Area", "Position", "RU height", "Width in", "Notes"])
+    _header(rack_sheet, ["Rack", "Row", "Area", "Position", "RU height", "Width in", "Restricted", "Restriction", "Notes"])
     areas = {a.id: a for a in db.query(Area).filter(Area.project_id == project.id).all()}
     for rack in racks:
         area_name = areas[rack.area_id].name if rack.area_id in areas else ""
-        rack_sheet.append([rack.name, rack.row_label, area_name, rack.position, rack.ru_height, rack.width_inches, rack.notes])
+        rack_sheet.append(
+            [
+                rack.name,
+                rack.row_label,
+                area_name,
+                rack.position,
+                rack.ru_height,
+                rack.width_inches,
+                "yes" if rack.restricted else "no",
+                rack.restriction_type,
+                rack.notes,
+            ]
+        )
     _autosize(rack_sheet)
 
     elev = wb.create_sheet("Elevations")
