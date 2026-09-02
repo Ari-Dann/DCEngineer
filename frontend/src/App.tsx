@@ -11,6 +11,7 @@ import VisionSession from "./pages/VisionSession";
 import Work from "./pages/Work";
 import Ops from "./pages/Ops";
 import Settings from "./pages/Settings";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 function Icon({ d }: { d: string }) {
   return (
@@ -66,7 +67,7 @@ function Layout({ children }: { children: ReactNode }) {
           <div className="grow" />
           <span className="muted">{session?.username}</span>
         </header>
-        {children}
+        <ErrorBoundary>{children}</ErrorBoundary>
         <nav className="nav">
           {items.map((i) => (
             <NavLink key={i.to} to={i.to} end={i.to === "/"}>

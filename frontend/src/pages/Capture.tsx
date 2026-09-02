@@ -248,7 +248,7 @@ export default function Capture() {
             name={`capture-row-${selectedRow.id}`}
             entity={selectedRow}
             scope="row"
-            inherited={inheritedPhotoBlockers({ project, area: selectedArea })}
+            inherited={inheritedPhotoBlockers({ project })}
             onPersist={async (type) => {
               try {
                 const saved = await projects.updateRow(Number(pid), selectedRow.id, { ...selectedRow, ...restrictionFields(type) });
@@ -265,7 +265,7 @@ export default function Capture() {
             name={`capture-rack-${selectedRack.id}`}
             entity={selectedRack}
             scope="rack"
-            inherited={inheritedPhotoBlockers({ project, area: selectedArea, row: selectedRow })}
+            inherited={inheritedPhotoBlockers({ project, row: selectedRow })}
             onPersist={async (type) => {
               try {
                 const saved = await projects.updateRack(Number(pid), selectedRack.id, { ...selectedRack, ...restrictionFields(type) });

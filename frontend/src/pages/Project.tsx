@@ -30,6 +30,7 @@ import AiImageParse, { EntryMode, EntryModeRadios } from "../components/AiImageP
 import RestrictionPicker, { SavedRestrictionPicker } from "../components/RestrictionPicker";
 import { parseIdParam, projectHref, rackHref } from "../nav";
 import {
+  inheritedPhotoBlockers,
   photosAllowed,
   restrictionCaption,
   restrictionFields,
@@ -155,16 +156,6 @@ export default function Project() {
     e.preventDefault();
     if (!project) return;
     await projects.update(pid, project);
-    load();
-  }
-
-  async function saveRowRestriction(row: AisleRow, type: RestrictionType) {
-    await projects.updateRow(pid, row.id, { ...row, ...restrictionFields(type) });
-    load();
-  }
-
-  async function saveRackRestriction(rack: Rack, type: RestrictionType) {
-    await projects.updateRack(pid, rack.id, { ...rack, ...restrictionFields(type) });
     load();
   }
 
@@ -705,7 +696,7 @@ export default function Project() {
               entity={r}
               scope="row"
               compact
-              inherited={inheritedPhotoBlockers({ project, area: parentArea })}
+              inherited={inheritedPhotoBlockers({ project })}
               onPersist={(type) => persistRowRestriction(r, type)}
             />
             {editingRow?.id === r.id && (
@@ -758,10 +749,7 @@ export default function Project() {
               name={`current-row-restriction-${currentRow.id}`}
               entity={currentRow}
               scope="row"
-              inherited={inheritedPhotoBlockers({
-                project,
-                area: areas.find((a) => a.id === currentRow.area_id) || null,
-              })}
+              inherited={inheritedPhotoBlockers({ project })}
               onPersist={(type) => persistRowRestriction(currentRow, type)}
             />
           )}
@@ -857,7 +845,9 @@ export default function Project() {
               });
             }}
           />
-          {racksForRow.map((r) => (
+          {racksForRow.map((r) => {
+            const parentRow = aisleRows.find((row) => row.id === r.row_id);
+            return (
             <div key={r.id}>
             <div className="list-item">
               <div className="list-main">
@@ -881,7 +871,7 @@ export default function Project() {
               entity={r}
               scope="rack"
               compact
-              inherited={inheritedPhotoBlockers({ project, area: parentArea, row: parentRow })}
+              inherited={inheritedPhotoBlockers({ project, row: parentRow })}
               onPersist={(type) => persistRackRestriction(r, type)}
             />
             {editingRack?.id === r.id && (
@@ -902,7 +892,8 @@ export default function Project() {
               </form>
             )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
