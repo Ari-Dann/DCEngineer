@@ -178,7 +178,7 @@ export default function Project() {
     else nextParams.delete("area");
     if (row) nextParams.set("row", String(row));
     else nextParams.delete("row");
-    setParams(nextParams, { replace: true });
+    setParams(nextParams);
     setSelected([]);
   }
 
