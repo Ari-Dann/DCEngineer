@@ -969,21 +969,6 @@ export function DeviceEditorModal({
             )}
           </p>
         )}
-        <DeviceFields
-          value={draft}
-          onChange={setDraft}
-          racks={racks}
-          areas={areas}
-          rows={rows}
-          devices={devices}
-          pdus={pdus}
-          showLocation={showLocation}
-          savedDeviceId={device?.id}
-          projectId={projectId}
-          project={project}
-          pendingPhotos={creating ? photos : undefined}
-          onPendingPhotos={creating ? setPhotos : undefined}
-        />
         {nested.length > 0 && (
           <div className="nested-list">
             <h3>Nested components</h3>
@@ -1007,6 +992,21 @@ export function DeviceEditorModal({
             </ul>
           </div>
         )}
+        <DeviceFields
+          value={draft}
+          onChange={setDraft}
+          racks={racks}
+          areas={areas}
+          rows={rows}
+          devices={devices}
+          pdus={pdus}
+          showLocation={showLocation}
+          savedDeviceId={device?.id}
+          projectId={projectId}
+          project={project}
+          pendingPhotos={creating ? photos : undefined}
+          onPendingPhotos={creating ? setPhotos : undefined}
+        />
         <button className="btn primary block" disabled={busy}>
           {busy ? "Saving…" : creating ? "Save device" : "Save changes"}
         </button>
