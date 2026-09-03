@@ -1900,6 +1900,204 @@ def test_emss_tag_is_independent_per_row_and_rack(client, auth):
     assert a04_rack["restriction_type"] == ""
 
 
+def test_import_nests_chassis_components_and_same_u_shelf(client, auth):
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    csv_body = (
+        "name,model,serial,asset tag,rack,u location\n"
+        "Cisco UCS-SP-5108-AC,UCS-SP-5108-AC,CHASSIS-1,AT-CH,R01,U32-U38\n"
+        "blade-a,,SN-BLADE-A,AT-A,R01,U34\n"
+        "blade-b,,SN-BLADE-B,AT-B,R01,U34\n"
+        "Disk shelf DS4246,DS4246,SHELF-1,AT-SH,R01,U10-U12\n"
+        "disk-1,,SN-DISK-1,AT-D1,R01,U10-U12\n"
+        "disk-2,,SN-DISK-2,AT-D2,R01,U10-U12\n"
+    )
+    project = client.post("/api/projects", headers=auth, json={"name": "Nest import"}).json()
+    pid = project["id"]
+    imported = client.post(
+        f"/api/projects/{pid}/import",
+        headers=auth,
+        files={"file": ("gear.csv", csv_body.encode(), "text/csv")},
+    )
+    assert imported.status_code == 200, imported.text
+    summary = imported.json()
+    assert summary["created"] == 6
+    assert summary["nested"] == 4
+
+    devices = {d["serial"]: d for d in client.get(f"/api/projects/{pid}/devices", headers=auth).json()}
+    chassis = devices["CHASSIS-1"]
+    shelf = devices["SHELF-1"]
+    assert chassis["ru_start"] == 32
+    assert chassis["ru_end"] == 38
+    assert chassis["parent_device_id"] is None
+    assert devices["SN-BLADE-A"]["parent_device_id"] == chassis["id"]
+    assert devices["SN-BLADE-B"]["parent_device_id"] == chassis["id"]
+    assert devices["SN-BLADE-A"]["ru_start"] == 34
+    assert devices["SN-BLADE-A"]["asset_tag"] == "AT-A"
+    assert shelf["parent_device_id"] is None
+    assert devices["SN-DISK-1"]["parent_device_id"] == shelf["id"]
+    assert devices["SN-DISK-2"]["parent_device_id"] == shelf["id"]
+
+    racks = client.get(f"/api/projects/{pid}/racks", headers=auth).json()
+    rid = next(r["id"] for r in racks if r["name"] == "R01")
+    elev = client.get(f"/api/projects/{pid}/racks/{rid}/elevation", headers=auth).json()
+    by_u = {s["u"]: s["device_id"] for s in elev["slots"]}
+    assert by_u[32] == chassis["id"]
+    assert by_u[34] == chassis["id"]
+    assert by_u[38] == chassis["id"]
+    assert by_u[10] == shelf["id"]
+    assert by_u[12] == shelf["id"]
+    assert devices["SN-BLADE-A"]["id"] not in by_u.values()
+    assert devices["SN-DISK-1"]["id"] not in by_u.values()
+
+    svg = client.get(f"/api/projects/{pid}/racks/{rid}/elevation.svg", headers=auth)
+    assert svg.status_code == 200
+    body = svg.text
+    assert "Cisco UCS-SP-5108-AC" in body
+    assert "2 inside" in body
+    assert "blade-a" not in body
+    assert "disk-1" not in body
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Name", "Model", "Serial", "Asset tag", "Rack", "U"])
+    ws.append(["Cisco UCS-SP-5108-AC", "UCS-SP-5108-AC", "CHASSIS-X", "AT-X", "R02", "U32-U38"])
+    ws.append(["io-mod", "", "SN-IO", "AT-IO", "R02", "U34"])
+    buf = BytesIO()
+    wb.save(buf)
+    xlsx = client.post(
+        f"/api/projects/{pid}/import",
+        headers=auth,
+        files={
+            "file": (
+                "gear.xlsx",
+                buf.getvalue(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert xlsx.status_code == 200, xlsx.text
+    assert xlsx.json()["nested"] >= 1
+    after = {d["serial"]: d for d in client.get(f"/api/projects/{pid}/devices", headers=auth).json()}
+    assert after["SN-IO"]["parent_device_id"] == after["CHASSIS-X"]["id"]
+
+    exported = client.get(f"/api/projects/{pid}/export.xlsx", headers=auth)
+    assert exported.status_code == 200
+    from openpyxl import load_workbook
+
+    book = load_workbook(BytesIO(exported.content), data_only=True)
+    headers = [cell.value for cell in next(book["Devices"].iter_rows(min_row=1, max_row=1))]
+    assert "Chassis / shelf" in headers
+    parent_col = headers.index("Chassis / shelf") + 1
+    serial_col = headers.index("Serial") + 1
+    parents = {
+        book["Devices"].cell(row, serial_col).value: book["Devices"].cell(row, parent_col).value
+        for row in range(2, book["Devices"].max_row + 1)
+    }
+    assert parents["SN-BLADE-A"] == "Cisco UCS-SP-5108-AC"
+    assert parents["SN-DISK-1"] == "Disk shelf DS4246"
+
+
+def test_create_update_nests_and_copy_move_preserve_parent(client, auth):
+    project = client.post("/api/projects", headers=auth, json={"name": "Nest editor"}).json()
+    pid = project["id"]
+    dest = client.post("/api/projects", headers=auth, json={"name": "Nest dest"}).json()
+    dest_id = dest["id"]
+    rack = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "A01", "ru_height": 42},
+    ).json()
+    rid = rack["id"]
+    chassis = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={
+            "name": "UCS chassis",
+            "model": "UCS-SP-5108-AC",
+            "rack_id": rid,
+            "ru_start": 32,
+            "ru_end": 38,
+            "serial": "CH-1",
+        },
+    ).json()
+    blade = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={
+            "name": "blade-1",
+            "rack_id": rid,
+            "ru_start": 34,
+            "ru_end": 34,
+            "serial": "BL-1",
+            "asset_tag": "AT-BL",
+        },
+    ).json()
+    assert blade["parent_device_id"] == chassis["id"]
+
+    other = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "B01", "ru_height": 42},
+    ).json()
+    moved_blade = client.post(
+        f"/api/projects/{pid}/devices/{blade['id']}/move",
+        headers=auth,
+        json={"target_project_id": pid, "target_rack_id": other["id"]},
+    ).json()
+    assert moved_blade["rack_id"] == other["id"]
+    assert moved_blade["parent_device_id"] is None
+
+    blade = client.patch(
+        f"/api/projects/{pid}/devices/{blade['id']}",
+        headers=auth,
+        json={"rack_id": rid, "ru_start": 34, "ru_end": 34},
+    ).json()
+    assert blade["parent_device_id"] == chassis["id"]
+
+    copied_rack = client.post(
+        f"/api/projects/{pid}/racks/{rid}/copy",
+        headers=auth,
+        json={"target_project_id": dest_id, "include_devices": True},
+    )
+    assert copied_rack.status_code == 200, copied_rack.text
+    dest_devices = {d["serial"]: d for d in client.get(f"/api/projects/{dest_id}/devices", headers=auth).json()}
+    assert dest_devices["BL-1"]["parent_device_id"] == dest_devices["CH-1"]["id"]
+    assert dest_devices["BL-1"]["id"] != blade["id"]
+
+    single = client.post(
+        f"/api/projects/{pid}/devices/{chassis['id']}/copy",
+        headers=auth,
+        json={"target_project_id": dest_id, "target_rack_id": dest_devices["CH-1"]["rack_id"]},
+    ).json()
+    assert single["parent_device_id"] is None
+    dest_after = client.get(f"/api/projects/{dest_id}/devices", headers=auth).json()
+    assert sum(1 for d in dest_after if d["serial"] == "BL-1") == 1
+
+    dest_rack = client.post(
+        f"/api/projects/{dest_id}/racks",
+        headers=auth,
+        json={"name": "MOVE", "ru_height": 42},
+    ).json()
+    moved_parent = client.post(
+        f"/api/projects/{pid}/devices/{chassis['id']}/move",
+        headers=auth,
+        json={"target_project_id": dest_id, "target_rack_id": dest_rack["id"]},
+    ).json()
+    assert moved_parent["rack_id"] == dest_rack["id"]
+    moved_child = client.get(f"/api/projects/{dest_id}/devices/{blade['id']}", headers=auth).json()
+    assert moved_child["rack_id"] == dest_rack["id"]
+    assert moved_child["parent_device_id"] == chassis["id"]
+
+    deleted = client.delete(f"/api/projects/{dest_id}/devices/{chassis['id']}", headers=auth)
+    assert deleted.status_code == 200
+    orphan = client.get(f"/api/projects/{dest_id}/devices/{blade['id']}", headers=auth).json()
+    assert orphan["parent_device_id"] is None
+
+
+
 
 
 

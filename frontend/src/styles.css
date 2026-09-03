@@ -211,6 +211,13 @@ tr:hover td { background: var(--bg-hover); }
 }
 .error { background: #3a1512; color: #ffb4aa; padding: 10px 12px; border-radius: 10px; margin-bottom: 12px; }
 .success { background: #0e2e22; color: #8ef0c6; padding: 10px 12px; border-radius: 10px; margin-bottom: 12px; }
+button.linkish {
+  background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit;
+}
+.nested-list { margin: 12px 0 16px; }
+.nested-list ul { margin: 0; padding-left: 18px; }
+.nested-list li { margin: 6px 0; }
+.nested-device td:nth-child(2) { padding-left: 1.5rem; }
 
 .list-item {
   display: flex; justify-content: space-between; gap: 12px; align-items: center;

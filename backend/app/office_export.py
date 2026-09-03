@@ -16,6 +16,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 from sqlalchemy.orm import Session
 
 from app.models import AisleRow, Area, Attachment, Device, Project, Rack
+from app.nesting import nested_count_for, occupies_elevation
 from app.rbi_export import HEADER_FILL, HEADER_FONT, _autosize, _header, rack_svg
 from app.storage import get_storage
 
@@ -1006,7 +1007,7 @@ def build_vsdx(layout: Layout) -> bytes:
         top_y = 15.6
         occupied: dict[int, Device] = {}
         for device in layout.devices_by_rack.get(rack.id, []):
-            if device.ru_start is None:
+            if not occupies_elevation(device):
                 continue
             start, end = int(device.ru_start), int(device.ru_end or device.ru_start)
             for u in range(min(start, end), max(start, end) + 1):
@@ -1037,6 +1038,9 @@ def build_vsdx(layout: Layout) -> bytes:
                 label = f"{device.name}  {device.vendor} {device.model}".strip()
                 if owner:
                     label += f"  ·  {owner}"
+                inside = nested_count_for(device, layout.devices_by_rack.get(rack.id, []))
+                if inside:
+                    label += f"  ·  {inside} inside"
                 page.shapes.append(
                     _shape_xml(
                         sid,

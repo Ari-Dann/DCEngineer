@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.catalog import DEVICE_TYPES, IMPORT_FIELDS, identity_index, infer_identity, learn_values, remember_identity
 from app.layout import apply_row_to_rack
 from app.models import AisleRow, Area, Device, Rack
+from app.nesting import nest_devices_in_racks
 
 HEADER_MAP = {
     "name": ("name", "device", "device name", "device_name", "unit", "label", "hostname/device"),
@@ -143,6 +144,11 @@ _LOCATION_RACK_RU_RE = re.compile(
     (?:\s*[-–]\s*(?:r?u\s*)?(?P<ru_end>\d{1,2}))?
     """,
     re.IGNORECASE | re.VERBOSE,
+)
+# Full-string U/RU spans only: "U32-U38", "32-38", "U34", "RU32-RU38".
+_RU_SPAN_RE = re.compile(
+    r"^\s*(?:r?u\s*)?(?P<ru_start>\d{1,2})(?:\s*[-–]\s*(?:r?u\s*)?(?P<ru_end>\d{1,2}))?\s*$",
+    re.IGNORECASE,
 )
 
 
@@ -381,7 +387,8 @@ def records_from_grid(
         for row in grid[header_index + 1 :]:
             rec = {field: (row[idx] if idx < len(row) else "") for field, idx in used.items()}
             if any(_norm(v) for v in rec.values()):
-                records.append(apply_netbox_location(rec) if netbox else apply_location(rec))
+                rec = apply_netbox_location(rec) if netbox else apply_location(rec)
+                records.append(normalize_ru_fields(rec))
         return records
     width = max((len(r) for r in grid), default=0)
     for col in range(header_index + 1, width):
@@ -390,7 +397,8 @@ def records_from_grid(
             row = grid[row_idx] if row_idx < len(grid) else []
             rec[field] = row[col] if col < len(row) else ""
         if any(_norm(v) for v in rec.values()):
-            records.append(apply_netbox_location(rec) if netbox else apply_location(rec))
+            rec = apply_netbox_location(rec) if netbox else apply_location(rec)
+            records.append(normalize_ru_fields(rec))
     return records
 
 
@@ -475,11 +483,46 @@ def preview_import(
     }
 
 
+def parse_ru_span(value: str) -> tuple[int | None, int | None]:
+    """Parse a standalone U/RU value or range. Returns (start, end) with end None for a single U."""
+    text = _norm(value)
+    if not text:
+        return None, None
+    match = _RU_SPAN_RE.fullmatch(text)
+    if not match:
+        return None, None
+    start = int(match.group("ru_start"))
+    end_raw = match.group("ru_end")
+    end = int(end_raw) if end_raw else None
+    if end is not None and end < start:
+        start, end = end, start
+    return start, end
+
+
+def normalize_ru_fields(record: dict[str, str]) -> dict[str, str]:
+    """Turn 'U32-U38' / 'U34' in ru_start or ru_end into integer strings."""
+    start, end = parse_ru_span(record.get("ru_start") or "")
+    if start is not None:
+        record["ru_start"] = str(start)
+        if end is not None and not (record.get("ru_end") or "").strip():
+            record["ru_end"] = str(end)
+    end_start, end_span = parse_ru_span(record.get("ru_end") or "")
+    if end_start is not None:
+        record["ru_end"] = str(end_span if end_span is not None else end_start)
+    return record
+
+
 def parse_location(value: str) -> dict[str, str]:
     """Parse a combined location such as 'A12 R09-RU19' into row, rack, and RU fields."""
     text = _norm(value)
     if not text:
         return {}
+    start, end = parse_ru_span(text)
+    if start is not None:
+        out = {"ru_start": str(start)}
+        if end is not None:
+            out["ru_end"] = str(end)
+        return out
     match = _LOCATION_RE.search(text) or _LOCATION_RACK_RU_RE.search(text)
     if not match:
         return {}
@@ -503,12 +546,11 @@ def parse_location(value: str) -> dict[str, str]:
 def apply_location(record: dict[str, str]) -> dict[str, str]:
     """Fill blank row/rack/RU fields from a mapped Location column; explicit columns win."""
     parsed = parse_location(record.get("location") or "")
-    if not parsed:
-        return record
-    for key in _LOCATION_LAYOUT_FIELDS:
-        if parsed.get(key) and not (record.get(key) or "").strip():
-            record[key] = parsed[key]
-    return record
+    if parsed:
+        for key in _LOCATION_LAYOUT_FIELDS:
+            if parsed.get(key) and not (record.get(key) or "").strip():
+                record[key] = parsed[key]
+    return normalize_ru_fields(record)
 
 
 def _split_nested_location(value: str) -> tuple[str, str]:
@@ -542,10 +584,24 @@ def apply_netbox_location(record: dict[str, str]) -> dict[str, str]:
 def _int(value: str) -> int | None:
     if not value:
         return None
+    start, _end = parse_ru_span(value)
+    if start is not None:
+        return start
     try:
         return int(float(value))
     except ValueError:
         return None
+
+
+def _ru_from_row(row: dict[str, str]) -> tuple[int | None, int | None]:
+    start, end = parse_ru_span(row.get("ru_start") or "")
+    end_start, end_span = parse_ru_span(row.get("ru_end") or "")
+    if end_start is not None:
+        end = end_span if end_span is not None else end_start
+    height = _int(row.get("ru_height", ""))
+    if start is not None and end is None and height:
+        end = start + height - 1
+    return start, end
 
 
 def _normalize_type(value: str) -> str:
@@ -587,6 +643,7 @@ def _empty_result(errors: list[str] | None = None) -> dict:
         "names": [],
         "sheet": "",
         "orientation": "rows",
+        "nested": 0,
     }
 
 
@@ -773,11 +830,7 @@ def _hierarchy_for_record(
 
 
 def _device_payload(row: dict[str, str], name: str, rack: Rack | None) -> dict[str, Any]:
-    ru_start = _int(row.get("ru_start", ""))
-    ru_end = _int(row.get("ru_end", ""))
-    height = _int(row.get("ru_height", ""))
-    if ru_start is not None and ru_end is None and height:
-        ru_end = ru_start + height - 1
+    ru_start, ru_end = _ru_from_row(row)
     serial = (row.get("serial") or "").strip()
     payload: dict[str, Any] = {
         "name": name[:255],
@@ -879,6 +932,7 @@ def import_devices(
     total_rows = 0
     orientations: list[str] = []
     sheet_names: list[str] = []
+    touched_rack_ids: set[int] = set()
 
     for sheet_name, grid in targets:
         if all_sheets and (sheet_name or "").lower().strip() in _NON_DEVICE_SHEETS:
@@ -925,11 +979,7 @@ def import_devices(
             _area, _aisle, rack = _hierarchy_for_record(index, row, sheet_name)
             if not name:
                 continue
-            ru_end = _int(row.get("ru_end", ""))
-            height = _int(row.get("ru_height", ""))
-            ru_start = _int(row.get("ru_start", ""))
-            if ru_start is not None and ru_end is None and height:
-                ru_end = ru_start + height - 1
+            ru_start, ru_end = _ru_from_row(row)
             if rack and ru_end and ru_end > rack.ru_height:
                 rack.ru_height = min(70, ru_end)
 
@@ -959,6 +1009,8 @@ def import_devices(
                     if allow_rack and rack and existing.rack_id is None:
                         existing.rack_id = rack.id
                     updated += 1
+                    if existing.rack_id:
+                        touched_rack_ids.add(existing.rack_id)
                 else:
                     defaults = dict(
                         hostname="",
@@ -980,6 +1032,8 @@ def import_devices(
                     db.flush()
                     index.remember(device)
                     created += 1
+                    if device.rack_id:
+                        touched_rack_ids.add(device.rack_id)
                 names.append(payload["name"])
                 learn_values(
                     db,
@@ -998,6 +1052,7 @@ def import_devices(
                 errors.append(f"{sheet_name} row {offset}: {exc}")
                 skipped += 1
 
+    nested = nest_devices_in_racks(db, touched_rack_ids)
     db.commit()
     return {
         "created": created,
@@ -1012,6 +1067,7 @@ def import_devices(
         "names": names[:25],
         "sheet": ", ".join(sheet_names),
         "orientation": orientations[0] if orientations else "rows",
+        "nested": nested,
     }
 
 

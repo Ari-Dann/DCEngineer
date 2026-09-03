@@ -3,7 +3,9 @@ from app.importer import (
     apply_netbox_location,
     known_field,
     looks_like_netbox,
+    normalize_ru_fields,
     parse_location,
+    parse_ru_span,
     suggest_mapping,
 )
 
@@ -40,6 +42,43 @@ def test_parse_location_rejects_noise():
     assert parse_location("") == {}
     assert parse_location("closet") == {}
     assert parse_location("Cisco ASR 1001-X") == {}
+
+
+def test_parse_ru_span_u_ranges():
+    assert parse_ru_span("U32-U38") == (32, 38)
+    assert parse_ru_span("32-38") == (32, 38)
+    assert parse_ru_span("U34") == (34, None)
+    assert parse_ru_span("RU32-RU38") == (32, 38)
+    assert parse_ru_span(" ru 10 – ru 12 ") == (10, 12)
+    assert parse_ru_span("U38-U32") == (32, 38)
+    assert parse_ru_span("Cisco ASR 1001-X") == (None, None)
+    assert parse_ru_span("") == (None, None)
+
+
+def test_parse_location_standalone_u_range():
+    assert parse_location("U32-U38") == {"ru_start": "32", "ru_end": "38"}
+    assert parse_location("U34") == {"ru_start": "34"}
+    assert parse_location("32-38") == {"ru_start": "32", "ru_end": "38"}
+    assert parse_location("RU32-RU38") == {"ru_start": "32", "ru_end": "38"}
+    assert parse_location("Cisco ASR 1001-X") == {}
+
+
+def test_apply_location_fills_u_range_from_location():
+    filled = apply_location({"location": "U32-U38", "name": "chassis"})
+    assert filled["ru_start"] == "32"
+    assert filled["ru_end"] == "38"
+
+
+def test_normalize_ru_fields_parses_mapped_u_column():
+    got = normalize_ru_fields({"ru_start": "U32-U38", "name": "chassis"})
+    assert got["ru_start"] == "32"
+    assert got["ru_end"] == "38"
+    single = normalize_ru_fields({"ru_start": "U34"})
+    assert single["ru_start"] == "34"
+    assert not single.get("ru_end")
+    mapped_u = known_field("u location")
+    assert mapped_u == "location"
+    assert known_field("u") == "ru_start"
 
 
 def test_apply_location_fills_blank_layout_fields_only():

@@ -231,7 +231,7 @@ export default function Project() {
       );
     } else {
       setImportMsg(
-        `Imported${sheet}: ${result.created} created, ${result.updated} updated${layout ? `, layout ${layout}` : ""}, ${result.skipped} skipped.${preserved}${names}`,
+        `Imported${sheet}: ${result.created} created, ${result.updated} updated${layout ? `, layout ${layout}` : ""}${result.nested ? `, ${result.nested} nested` : ""}, ${result.skipped} skipped.${preserved}${names}`,
       );
     }
     if (result.errors.length) setError(result.errors.join(" · "));
@@ -1032,8 +1032,13 @@ export default function Project() {
                   const rack = racks.find((r) => r.id === d.rack_id);
                   const row = aisleRows.find((r) => r.id === rack?.row_id);
                   const area = areas.find((a) => a.id === (rack?.area_id || row?.area_id));
+                  const parent = d.parent_device_id ? devices.find((p) => p.id === d.parent_device_id) : undefined;
+                  const ru =
+                    d.ru_start || d.ru_end
+                      ? `${d.ru_start || "—"}${d.ru_end && d.ru_end !== d.ru_start ? `–${d.ru_end}` : ""}`
+                      : "—";
                   return (
-                    <tr key={d.id} className="clickable" onClick={() => setEditing(d)}>
+                    <tr key={d.id} className={`clickable${d.parent_device_id ? " nested-device" : ""}`} onClick={() => setEditing(d)}>
                       <td onClick={(e) => e.stopPropagation()}>
                         <ItemSelect mode={selectMode} group="device-pick" id={d.id} selected={selected} onChange={setSelected} />
                       </td>
@@ -1051,7 +1056,8 @@ export default function Project() {
                       </td>
                       <td>{d.serial}</td>
                       <td>
-                        {d.ru_start || "—"}–{d.ru_end || "—"}
+                        {ru}
+                        {parent ? ` (in ${parent.name})` : ""}
                       </td>
                       <td>{formatPowerWatts(d.power_draw_watts)}</td>
                       <td>{formatAmps(d.dc_power_draw_amps)}</td>
@@ -1248,6 +1254,7 @@ export default function Project() {
       )}
       {editing && (
         <DeviceEditorModal
+          key={editing.id}
           projectId={pid}
           project={project}
           device={editing}
@@ -1261,6 +1268,7 @@ export default function Project() {
             setEditing(null);
             load();
           }}
+          onSelectDevice={setEditing}
           onRelocate={(mode) => {
             setRelocate({ kind: "device", ids: [editing.id], mode });
             setEditing(null);

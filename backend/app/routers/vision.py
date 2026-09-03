@@ -22,7 +22,7 @@ from app.models import (
     VisionProposal,
     VisionSession,
 )
-from app.routers.inventory import _ensure_rack_fits, _get_area, _get_project, device_out
+from app.routers.inventory import _ensure_rack_fits, _get_area, _get_project, _nest_device_racks, device_out
 from app.schemas import (
     CLIP_KINDS,
     CLIP_SOURCES,
@@ -776,6 +776,7 @@ def accept_proposal(
     db.add(device)
     db.flush()
     _ensure_rack_fits(db, device.rack_id, device.ru_end)
+    _nest_device_racks(db, device.rack_id)
     learn_values(
         db,
         vendor=device.vendor,

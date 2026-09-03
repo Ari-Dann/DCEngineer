@@ -314,6 +314,7 @@ export type ImportResult = {
   names?: string[];
   sheet?: string;
   orientation?: string;
+  nested?: number;
 };
 
 export type ImportField = { id: string; label: string };
@@ -695,6 +696,7 @@ export type Device = {
   function: string;
   ru_start?: number | null;
   ru_end?: number | null;
+  parent_device_id?: number | null;
   restricted: boolean;
   restricted_reason: string;
   fan_orientation: string;

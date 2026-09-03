@@ -96,6 +96,8 @@ def _ensure_columns() -> None:
                 conn.execute(text("ALTER TABLE devices ADD COLUMN pdu_b_id INTEGER"))
             if "owner" not in dcols:
                 conn.execute(text("ALTER TABLE devices ADD COLUMN owner VARCHAR(255) DEFAULT ''"))
+            if "parent_device_id" not in dcols:
+                conn.execute(text("ALTER TABLE devices ADD COLUMN parent_device_id INTEGER"))
     if "vision_sessions" in tables:
         scols = {c["name"] for c in inspector.get_columns("vision_sessions")}
         if "layout_review_json" not in scols:

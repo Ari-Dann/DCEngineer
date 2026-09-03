@@ -343,6 +343,9 @@ export default function Capture() {
               </strong>
               <div className="muted">
                 {d.vendor} {d.model} · SN {d.serial || "—"} · U{d.ru_start || "—"}
+                {d.parent_device_id
+                  ? ` (in ${devices.find((p) => p.id === d.parent_device_id)?.name || "parent"})`
+                  : ""}
               </div>
             </div>
             <span className="muted">edit</span>
@@ -352,6 +355,7 @@ export default function Capture() {
 
       {editing && pid && (
         <DeviceEditorModal
+          key={editing.id}
           projectId={Number(pid)}
           project={project}
           device={editing}
@@ -365,6 +369,7 @@ export default function Capture() {
             setEditing(null);
             loadDevices();
           }}
+          onSelectDevice={setEditing}
           onDelete={() => {
             setPendingDelete(editing);
             setEditing(null);
