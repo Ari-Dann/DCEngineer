@@ -147,6 +147,9 @@ class Device(Base):
     function: Mapped[str] = mapped_column(String(255), default="")
     ru_start: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     ru_end: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    parent_device_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("devices.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     restricted: Mapped[bool] = mapped_column(Boolean, default=False)
     restricted_reason: Mapped[str] = mapped_column(String(128), default="")
     fan_orientation: Mapped[str] = mapped_column(String(64), default="unknown")

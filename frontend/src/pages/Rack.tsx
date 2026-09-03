@@ -145,6 +145,7 @@ export default function RackPage() {
             {elev.slots.map((s) => {
               const dev = s.device_id ? byId.get(s.device_id) : undefined;
               const top = dev && (dev.ru_end || dev.ru_start) === s.u;
+              const inside = dev ? elev.devices.filter((d) => d.parent_device_id === dev.id).length : 0;
               return (
                 <div className="ru" key={s.u}>
                   <div className="u">{s.u}</div>
@@ -161,7 +162,11 @@ export default function RackPage() {
                       }
                     }}
                   >
-                    {top ? `${dev?.name} · ${dev?.vendor} ${dev?.model}` : dev ? "" : "empty — click to add"}
+                    {top
+                      ? `${dev?.name} · ${dev?.vendor} ${dev?.model}${inside ? ` · ${inside} inside` : ""}`
+                      : dev
+                        ? ""
+                        : "empty — click to add"}
                   </button>
                 </div>
               );
@@ -343,6 +348,7 @@ export default function RackPage() {
       )}
       {editing && (
         <DeviceEditorModal
+          key={editing.id}
           projectId={pid}
           project={project}
           device={editing}
@@ -357,6 +363,7 @@ export default function RackPage() {
             setEditing(null);
             load();
           }}
+          onSelectDevice={setEditing}
           onRelocate={(mode) => {
             setRelocate({ kind: "device", ids: [editing.id], mode });
             setEditing(null);

@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models import AisleRow, Area, Device, Rack
+from app.nesting import descendants, nest_devices_in_racks
 from app.schemas import RelocateIn
 
 _SKIP_CLONE = {"id"}
@@ -238,6 +239,28 @@ def _move_devices(db: Session, rack_ids: list[int], project_id: int) -> None:
     )
 
 
+def _copy_devices(db: Session, devices: list[Device], project_id: int, rack_id: int | None) -> None:
+    clones: list[tuple[Device, Device]] = []
+    id_map: dict[int, int] = {}
+    for device in devices:
+        clone = _clone(
+            device,
+            project_id=project_id,
+            rack_id=rack_id,
+            pdu_a_id=None,
+            pdu_b_id=None,
+            parent_device_id=None,
+        )
+        db.add(clone)
+        db.flush()
+        id_map[device.id] = clone.id
+        clones.append((device, clone))
+    for device, clone in clones:
+        parent_id = device.parent_device_id
+        if parent_id and parent_id in id_map:
+            clone.parent_device_id = id_map[parent_id]
+
+
 def _copy_racks(
     db: Session,
     racks: list[Rack],
@@ -258,8 +281,8 @@ def _copy_racks(
         db.add(dest)
         db.flush()
         if include_devices:
-            for device in db.query(Device).filter(Device.rack_id == rack.id).all():
-                db.add(_clone(device, project_id=project_id, rack_id=dest.id, pdu_a_id=None, pdu_b_id=None))
+            devices = db.query(Device).filter(Device.rack_id == rack.id).all()
+            _copy_devices(db, devices, project_id, dest.id)
 
 
 def _target_area(db: Session, project_id: int, area_id: Optional[int]) -> Area | None:
@@ -378,8 +401,8 @@ def apply_relocate(db: Session, kind: str, entity, body: RelocateIn, copy: bool)
             db.add(clone)
             db.flush()
             if include_devices:
-                for device in db.query(Device).filter(Device.rack_id == entity.id).all():
-                    db.add(_clone(device, project_id=target_project_id, rack_id=clone.id, pdu_a_id=None, pdu_b_id=None))
+                devices = db.query(Device).filter(Device.rack_id == entity.id).all()
+                _copy_devices(db, devices, target_project_id, clone.id)
             return clone
         orig_row_id = entity.row_id
         entity.project_id = target_project_id
@@ -399,7 +422,14 @@ def apply_relocate(db: Session, kind: str, entity, body: RelocateIn, copy: bool)
         dest_rack = _target_rack(db, target_project_id, body.target_rack_id)
         dest_rack_id = dest_rack.id if dest_rack else None
         if copy:
-            clone = _clone(entity, project_id=target_project_id, rack_id=dest_rack_id, pdu_a_id=None, pdu_b_id=None)
+            clone = _clone(
+                entity,
+                project_id=target_project_id,
+                rack_id=dest_rack_id,
+                pdu_a_id=None,
+                pdu_b_id=None,
+                parent_device_id=None,
+            )
             db.add(clone)
             db.flush()
             return clone
@@ -409,6 +439,13 @@ def apply_relocate(db: Session, kind: str, entity, body: RelocateIn, copy: bool)
         if old_rack_id != dest_rack_id:
             entity.pdu_a_id = None
             entity.pdu_b_id = None
+        for child in descendants(db, entity.id):
+            child.project_id = target_project_id
+            if old_rack_id != dest_rack_id:
+                child.rack_id = dest_rack_id
+                child.pdu_a_id = None
+                child.pdu_b_id = None
+        nest_devices_in_racks(db, [rid for rid in (old_rack_id, dest_rack_id) if rid])
         return entity
 
     raise HTTPException(400, "Unknown relocate kind")

@@ -15,11 +15,34 @@ type HeaderMap = Record<number, string>;
 const LOCATION_RE =
   /(?:row\s+)?([A-Za-z]{1,8}\d{1,4})\s*[/\-, ]+(?:r(?:ack)?\s*)?(\d{1,4})(?:\s*[/\-, ]+(?:r?u\s*)(\d{1,2})(?:\s*[-–]\s*(?:r?u\s*)?(\d{1,2}))?)?/i;
 const LOCATION_RACK_RU_RE = /r(?:ack)?\s*(\d{1,4})\s*[/\-, ]+(?:r?u\s*)(\d{1,2})(?:\s*[-–]\s*(?:r?u\s*)?(\d{1,2}))?/i;
+const RU_SPAN_RE = /^(?:r?u\s*)?(\d{1,2})(?:\s*[-–]\s*(?:r?u\s*)?(\d{1,2}))?$/i;
 const DERIVED_LOCATION_FIELDS = ["row", "rack", "ru_start", "ru_end"] as const;
+
+function parseRuSpan(value: string): { ru_start?: string; ru_end?: string } {
+  const text = (value || "").trim();
+  const match = text.match(RU_SPAN_RE);
+  if (!match) return {};
+  const out: { ru_start?: string; ru_end?: string } = { ru_start: match[1] };
+  if (match[2]) out.ru_end = match[2];
+  return out;
+}
+
+function normalizeRuFields(rec: Record<string, string>) {
+  const start = parseRuSpan(rec.ru_start || "");
+  if (start.ru_start) {
+    rec.ru_start = start.ru_start;
+    if (start.ru_end && !rec.ru_end) rec.ru_end = start.ru_end;
+  }
+  const end = parseRuSpan(rec.ru_end || "");
+  if (end.ru_start) rec.ru_end = end.ru_end || end.ru_start;
+  return rec;
+}
 
 function parseLocation(value: string): Record<string, string> {
   const text = (value || "").trim();
   if (!text) return {};
+  const span = parseRuSpan(text);
+  if (span.ru_start) return span;
   const full = text.match(LOCATION_RE);
   if (full) {
     const out: Record<string, string> = {};
@@ -58,7 +81,7 @@ function sampleRecords(sheet: ImportPreviewSheet, headerMap: HeaderMap) {
         if (parsed[key] && !rec[key]) rec[key] = parsed[key];
       }
     }
-    return rec;
+    return normalizeRuFields(rec);
   });
 }
 
@@ -222,8 +245,11 @@ export default function ImportWizard({
         <p className="muted">
           Choose a project, then map spreadsheet columns (or rows) onto device and layout fields. A Location column such as{" "}
           <code>A12 R09-RU19</code> can be mapped to “Location (parse row / rack / RU)” and is split into row A12, rack 09,
-          and RU 19. Import follows Area → Row → Rack → Device and will not move populated items into a different parent.
-          Empty cells do not blank fields that are already filled. CSV, XLSX, and ODS are supported.
+          and RU 19. Standalone U ranges like <code>U32-U38</code> or <code>U34</code> also parse as RU start/end. Chassis,
+          shelf, and enclosure rows keep the U range on the elevation; components that share or sit inside that range nest
+          under the parent instead of overlapping. Import follows Area → Row → Rack → Device and will not move populated
+          items into a different parent. Empty cells do not blank fields that are already filled. CSV, XLSX, and ODS are
+          supported.
         </p>
         {error && <div className="error">{error}</div>}
 
@@ -309,7 +335,7 @@ export default function ImportWizard({
               {sheet.record_count} record{sheet.record_count === 1 ? "" : "s"} on “{sheet.name}”. Map each spreadsheet
               heading to a DCEngineer field, or leave as skip.
               {locationMapped
-                ? " Location values like A12 R09-RU19 become row, rack, and RU start unless those columns are mapped separately."
+                ? " Location values like A12 R09-RU19 or U32-U38 become row, rack, and RU unless those columns are mapped separately. Chassis and shelf components nest instead of overlapping."
                 : ""}
             </p>
             <div className="table-wrap">

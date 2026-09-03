@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import Area, Cable, Device, Handoff, PDU, PDUPort, Project, Rack
+from app.nesting import nested_count_for, occupies_elevation
 
 
 HEADER_FILL = PatternFill("solid", fgColor="1B3A4B")
@@ -162,6 +163,7 @@ def build_rbi_workbook(db: Session, project: Project) -> bytes:
             "Rack",
             "Row",
             "Area",
+            "Chassis / shelf",
             "Vendor",
             "Model",
             "Serial",
@@ -189,9 +191,11 @@ def build_rbi_workbook(db: Session, project: Project) -> bytes:
             "Notes",
         ],
     )
+    device_by_id = {d.id: d for d in devices}
     for dev in devices:
         rack_obj = rack_by_id.get(dev.rack_id) if dev.rack_id else None
         rack_name = rack_obj.name if rack_obj else ""
+        parent = device_by_id.get(dev.parent_device_id) if getattr(dev, "parent_device_id", None) else None
         status = eol_status(dev.eol_date)
         row = [
             dev.name,
@@ -199,6 +203,7 @@ def build_rbi_workbook(db: Session, project: Project) -> bytes:
             rack_name,
             (rack_obj.row_label if rack_obj else "") or "",
             areas[rack_obj.area_id].name if rack_obj and rack_obj.area_id in areas else "",
+            parent.name if parent else "",
             dev.vendor,
             dev.model,
             dev.serial,
@@ -312,7 +317,7 @@ def rack_svg(rack: Rack, devices: list[Device]) -> str:
     ]
     occupied: dict[int, Device] = {}
     for dev in devices:
-        if dev.ru_start is None:
+        if not occupies_elevation(dev):
             continue
         start = int(dev.ru_start)
         end = int(dev.ru_end or dev.ru_start)
@@ -337,7 +342,11 @@ def rack_svg(rack: Rack, devices: list[Device]) -> str:
             parts.append(
                 f'<rect x="44" y="{y0 + 1}" width="{width-60}" height="{span * row_h - 3}" rx="3" fill="{fill}" opacity="0.85"/>'
             )
-            label = _esc(f"{dev.name}  {dev.vendor} {dev.model}".strip())
+            inside = nested_count_for(dev, devices)
+            label = f"{dev.name}  {dev.vendor} {dev.model}".strip()
+            if inside:
+                label = f"{label}  ({inside} inside)"
+            label = _esc(label)
             parts.append(
                 f'<text x="52" y="{y0 + 12}" fill="#0b0f14" font-family="sans-serif" font-size="11">{label}</text>'
             )

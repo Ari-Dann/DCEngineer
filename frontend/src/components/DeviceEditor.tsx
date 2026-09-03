@@ -872,6 +872,7 @@ export function DeviceEditorModal({
   onSaved,
   onRelocate,
   onDelete,
+  onSelectDevice,
 }: {
   projectId: number;
   device?: Device | null;
@@ -887,12 +888,15 @@ export function DeviceEditorModal({
   onSaved: (d: Device) => void;
   onRelocate?: (mode: "copy" | "move") => void;
   onDelete?: () => void;
+  onSelectDevice?: (d: Device) => void;
 }) {
   const creating = !device;
   const [draft, setDraft] = useState(device ? draftFromDevice(device) : initialDraft || emptyDraft());
   const [photos, setPhotos] = useState<File[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const parent = device?.parent_device_id ? devices.find((d) => d.id === device.parent_device_id) : undefined;
+  const nested = device ? devices.filter((d) => d.parent_device_id === device.id) : [];
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -953,6 +957,41 @@ export function DeviceEditorModal({
           </span>
         </div>
         {error && <div className="error">{error}</div>}
+        {parent && (
+          <p className="muted">
+            Inside:{" "}
+            {onSelectDevice ? (
+              <button type="button" className="linkish" onClick={() => onSelectDevice(parent)}>
+                {parent.name}
+              </button>
+            ) : (
+              parent.name
+            )}
+          </p>
+        )}
+        {nested.length > 0 && (
+          <div className="nested-list">
+            <h3>Nested components</h3>
+            <ul>
+              {nested.map((child) => (
+                <li key={child.id}>
+                  {onSelectDevice ? (
+                    <button type="button" className="linkish" onClick={() => onSelectDevice(child)}>
+                      {child.name}
+                    </button>
+                  ) : (
+                    <strong>{child.name}</strong>
+                  )}
+                  <span className="muted">
+                    {" "}
+                    · SN {child.serial || "—"} · {child.asset_tag || "—"} · U{child.ru_start || "—"}
+                    {child.ru_end && child.ru_end !== child.ru_start ? `–${child.ru_end}` : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <DeviceFields
           value={draft}
           onChange={setDraft}

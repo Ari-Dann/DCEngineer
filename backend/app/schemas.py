@@ -191,6 +191,7 @@ class DeviceIn(BaseModel):
     function: str = ""
     ru_start: Optional[int] = Field(default=None, ge=1, le=70)
     ru_end: Optional[int] = Field(default=None, ge=1, le=70)
+    parent_device_id: Optional[int] = None
     restricted: bool = False
     restricted_reason: str = ""
     fan_orientation: str = "unknown"
@@ -238,6 +239,7 @@ class DevicePatch(BaseModel):
     function: Optional[str] = None
     ru_start: Optional[int] = Field(default=None, ge=1, le=70)
     ru_end: Optional[int] = Field(default=None, ge=1, le=70)
+    parent_device_id: Optional[int] = None
     restricted: Optional[bool] = None
     restricted_reason: Optional[str] = None
     fan_orientation: Optional[str] = None

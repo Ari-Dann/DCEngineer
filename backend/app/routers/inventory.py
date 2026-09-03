@@ -32,6 +32,7 @@ from app.models import (
 from app.catalog import learn_values
 from app.importer import import_devices, preview_import
 from app.layout import apply_relocate, apply_row_to_rack, backfill_rows, bulk_create_rows, resolve_or_create_row, unique_labels
+from app.nesting import detach_children, nest_devices_in_racks, occupies_elevation
 from app.rbi_export import eol_status
 from app.restriction import apply_flags
 from app.schemas import (
@@ -93,6 +94,10 @@ def device_out(dev: Device) -> DeviceOut:
     out = DeviceOut.model_validate(dev)
     out.eol_status = eol_status(dev.eol_date)
     return out
+
+
+def _nest_device_racks(db: Session, *rack_ids: int | None) -> None:
+    nest_devices_in_racks(db, [rid for rid in rack_ids if rid])
 
 
 def _ensure_rack_fits(db: Session, rack_id: int | None, ru_end: int | None) -> None:
@@ -462,7 +467,7 @@ def rack_elevation(project_id: int, rack_id: int, db: Session = Depends(get_db),
     slots = []
     occupied = {}
     for dev in devices:
-        if dev.ru_start is None:
+        if not occupies_elevation(dev):
             continue
         start, end = int(dev.ru_start), int(dev.ru_end or dev.ru_start)
         for u in range(min(start, end), max(start, end) + 1):
@@ -670,6 +675,7 @@ def create_device(project_id: int, body: DeviceIn, db: Session = Depends(get_db)
     db.add(device)
     db.flush()
     _ensure_rack_fits(db, device.rack_id, device.ru_end)
+    _nest_device_racks(db, device.rack_id)
     learn_values(
         db,
         vendor=device.vendor,
@@ -687,13 +693,17 @@ def update_device(
     project_id: int, device_id: int, body: DevicePatch, db: Session = Depends(get_db), _: User = Depends(WriteUser)
 ):
     device = _get_device(db, project_id, device_id)
+    previous_rack_id = device.rack_id
     data = body.model_dump(exclude_unset=True)
     if "pdu_a_id" in data:
         data["pdu_a_id"] = _pdu_in_project(db, project_id, data.get("pdu_a_id"))
     if "pdu_b_id" in data:
         data["pdu_b_id"] = _pdu_in_project(db, project_id, data.get("pdu_b_id"))
     _apply(device, data)
+    if not device.rack_id or device.ru_start is None:
+        device.parent_device_id = None
     _ensure_rack_fits(db, device.rack_id, device.ru_end)
+    _nest_device_racks(db, previous_rack_id, device.rack_id)
     learn_values(
         db,
         vendor=device.vendor,
@@ -723,6 +733,7 @@ def move_device(
 @projects_router.delete("/{project_id}/devices/{device_id}")
 def delete_device(project_id: int, device_id: int, db: Session = Depends(get_db), _: User = Depends(WriteUser)):
     device = _get_device(db, project_id, device_id)
+    detach_children(db, device.id)
     db.delete(device)
     db.commit()
     return {"ok": True}
