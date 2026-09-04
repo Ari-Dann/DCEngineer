@@ -681,28 +681,32 @@ export default function Project() {
             <div className="list-item">
               <div className="list-main">
                 <ItemSelect mode={selectMode} group="row-pick" id={r.id} selected={selected} onChange={setSelected} />
-                <button
-                  type="button"
-                  className="list-main"
-                  onClick={() => setHierarchy({ tab: "racks", area: r.area_id || areaFilter || "", row: r.id })}
-                >
-                  <span>
+                <div className="list-identity">
+                  <button
+                    type="button"
+                    className="list-name"
+                    onClick={() => setHierarchy({ tab: "racks", area: r.area_id || areaFilter || "", row: r.id })}
+                  >
                     <strong>{r.name}</strong>
-                    <div className="muted">
-                      {parentArea?.name || "no area"} · {countPhrase(rackCount, "rack")} · {countPhrase(deviceCount, "device")} ·{" "}
-                      {formatHierarchyPower(watts, amps)} · {restrictionCaption(r)}
-                    </div>
-                  </span>
-                </button>
-                <SavedRestrictionPicker
-                  name={`row-restriction-${r.id}`}
-                  entity={r}
-                  scope="row"
-                  compact
-                  inline
-                  inherited={inheritedPhotoBlockers({ project })}
-                  onPersist={(type) => persistRowRestriction(r, type)}
-                />
+                  </button>
+                  <SavedRestrictionPicker
+                    name={`row-restriction-${r.id}`}
+                    entity={r}
+                    scope="row"
+                    compact
+                    inline
+                    inherited={inheritedPhotoBlockers({ project })}
+                    onPersist={(type) => persistRowRestriction(r, type)}
+                  />
+                  <button
+                    type="button"
+                    className="list-meta muted"
+                    onClick={() => setHierarchy({ tab: "racks", area: r.area_id || areaFilter || "", row: r.id })}
+                  >
+                    {parentArea?.name || "no area"} · {countPhrase(rackCount, "rack")} · {countPhrase(deviceCount, "device")} ·{" "}
+                    {formatHierarchyPower(watts, amps)} · {restrictionCaption(r)}
+                  </button>
+                </div>
               </div>
               <button type="button" className="btn" onClick={() => setOpenRow(openRow === r.id ? null : r.id)}>
                 Photos
@@ -862,28 +866,31 @@ export default function Project() {
             <div className="list-item">
               <div className="list-main">
                 <ItemSelect mode={selectMode} group="rack-pick" id={r.id} selected={selected} onChange={setSelected} />
-                <Link
-                  className="list-main"
-                  to={rackHref(pid, r.id, { area: r.area_id || areaFilter, row: r.row_id || rowFilter })}
-                >
-                  <span>
+                <div className="list-identity">
+                  <Link
+                    className="list-name"
+                    to={rackHref(pid, r.id, { area: r.area_id || areaFilter, row: r.row_id || rowFilter })}
+                  >
                     <strong>{r.name}</strong>
-                    <div className="muted">
-                      {layoutPath(r, aisleRows, areas)} · {r.ru_height}U · {countPhrase(deviceCount, "device")} ·{" "}
-                      {formatHierarchyPower(sumPowerWatts(devices, [r.id]), sumDcAmps(devices, [r.id]))} ·{" "}
-                      {restrictionCaption(r)}
-                    </div>
-                  </span>
-                </Link>
-                <SavedRestrictionPicker
-                  name={`rack-restriction-${r.id}`}
-                  entity={r}
-                  scope="rack"
-                  compact
-                  inline
-                  inherited={inheritedPhotoBlockers({ project, row: parentRow })}
-                  onPersist={(type) => persistRackRestriction(r, type)}
-                />
+                  </Link>
+                  <SavedRestrictionPicker
+                    name={`rack-restriction-${r.id}`}
+                    entity={r}
+                    scope="rack"
+                    compact
+                    inline
+                    inherited={inheritedPhotoBlockers({ project, row: parentRow })}
+                    onPersist={(type) => persistRackRestriction(r, type)}
+                  />
+                  <Link
+                    className="list-meta muted"
+                    to={rackHref(pid, r.id, { area: r.area_id || areaFilter, row: r.row_id || rowFilter })}
+                  >
+                    {layoutPath(r, aisleRows, areas)} · {r.ru_height}U · {countPhrase(deviceCount, "device")} ·{" "}
+                    {formatHierarchyPower(sumPowerWatts(devices, [r.id]), sumDcAmps(devices, [r.id]))} ·{" "}
+                    {restrictionCaption(r)}
+                  </Link>
+                </div>
               </div>
             </div>
             {editingRack?.id === r.id && (
