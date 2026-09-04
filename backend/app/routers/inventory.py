@@ -600,6 +600,178 @@ def search_inventory(
     return {"query": q, "count": len(hits), "devices": hits}
 
 
+_SEARCH_LIMIT = 40
+
+
+def _empty_global_search(q: str) -> dict[str, Any]:
+    return {"q": q, "projects": [], "areas": [], "rows": [], "racks": [], "devices": []}
+
+
+@ops_router.get("/search")
+def global_search(
+    q: str = "",
+    project_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    needle = (q or "").strip()
+    if not needle:
+        return _empty_global_search(needle)
+    like = f"%{needle}%"
+    if project_id:
+        _get_project(db, project_id)
+
+    pq = db.query(Project).filter(
+        or_(
+            Project.name.ilike(like),
+            Project.customer.ilike(like),
+            Project.site_name.ilike(like),
+            Project.site_address.ilike(like),
+            Project.sponsor.ilike(like),
+        )
+    )
+    if project_id:
+        pq = pq.filter(Project.id == project_id)
+    projects = [
+        {
+            "id": p.id,
+            "name": p.name,
+            "customer": p.customer,
+            "site_name": p.site_name,
+            "status": p.status,
+        }
+        for p in pq.order_by(Project.name).limit(_SEARCH_LIMIT).all()
+    ]
+
+    aq = (
+        db.query(Area, Project)
+        .join(Project, Area.project_id == Project.id)
+        .filter(or_(Area.name.ilike(like), Area.description.ilike(like)))
+    )
+    if project_id:
+        aq = aq.filter(Area.project_id == project_id)
+    areas = [
+        {
+            "id": area.id,
+            "name": area.name,
+            "project_id": area.project_id,
+            "project_name": project.name,
+            "description": area.description,
+        }
+        for area, project in aq.order_by(Area.name).limit(_SEARCH_LIMIT).all()
+    ]
+
+    rq = (
+        db.query(AisleRow, Project, Area)
+        .join(Project, AisleRow.project_id == Project.id)
+        .outerjoin(Area, AisleRow.area_id == Area.id)
+        .filter(or_(AisleRow.name.ilike(like), AisleRow.notes.ilike(like)))
+    )
+    if project_id:
+        rq = rq.filter(AisleRow.project_id == project_id)
+    rows = [
+        {
+            "id": row.id,
+            "name": row.name,
+            "project_id": row.project_id,
+            "project_name": project.name,
+            "area_id": row.area_id,
+            "area_name": area.name if area else None,
+        }
+        for row, project, area in rq.order_by(AisleRow.name).limit(_SEARCH_LIMIT).all()
+    ]
+
+    kq = (
+        db.query(Rack, Project, Area, AisleRow)
+        .join(Project, Rack.project_id == Project.id)
+        .outerjoin(Area, Rack.area_id == Area.id)
+        .outerjoin(AisleRow, Rack.row_id == AisleRow.id)
+        .filter(
+            or_(
+                Rack.name.ilike(like),
+                Rack.row_label.ilike(like),
+                Rack.position.ilike(like),
+                Rack.notes.ilike(like),
+            )
+        )
+    )
+    if project_id:
+        kq = kq.filter(Rack.project_id == project_id)
+    racks = [
+        {
+            "id": rack.id,
+            "name": rack.name,
+            "project_id": rack.project_id,
+            "project_name": project.name,
+            "area_id": rack.area_id,
+            "area_name": area.name if area else None,
+            "row_id": rack.row_id,
+            "row_name": (row.name if row else None) or rack.row_label or None,
+            "ru_height": rack.ru_height,
+        }
+        for rack, project, area, row in kq.order_by(Rack.name).limit(_SEARCH_LIMIT).all()
+    ]
+
+    dq = db.query(Device).filter(
+        or_(
+            Device.name.ilike(like),
+            Device.serial.ilike(like),
+            Device.vendor.ilike(like),
+            Device.model.ilike(like),
+            Device.hostname.ilike(like),
+            Device.asset_tag.ilike(like),
+            Device.owner.ilike(like),
+            Device.management_ip.ilike(like),
+            Device.function.ilike(like),
+            Device.notes.ilike(like),
+            Device.device_type.ilike(like),
+        )
+    )
+    if project_id:
+        dq = dq.filter(Device.project_id == project_id)
+    devices_found = dq.order_by(Device.name).limit(_SEARCH_LIMIT).all()
+    project_ids = {d.project_id for d in devices_found}
+    rack_ids = {d.rack_id for d in devices_found if d.rack_id}
+    projects_by_id = (
+        {p.id: p for p in db.query(Project).filter(Project.id.in_(project_ids)).all()} if project_ids else {}
+    )
+    racks_by_id = {r.id: r for r in db.query(Rack).filter(Rack.id.in_(rack_ids)).all()} if rack_ids else {}
+    row_ids = {r.row_id for r in racks_by_id.values() if r.row_id}
+    area_ids = {r.area_id for r in racks_by_id.values() if r.area_id}
+    rows_by_id = {r.id: r for r in db.query(AisleRow).filter(AisleRow.id.in_(row_ids)).all()} if row_ids else {}
+    areas_by_id = {a.id: a for a in db.query(Area).filter(Area.id.in_(area_ids)).all()} if area_ids else {}
+    devices = []
+    for dev in devices_found:
+        rack = racks_by_id.get(dev.rack_id) if dev.rack_id else None
+        row = rows_by_id.get(rack.row_id) if rack and rack.row_id else None
+        area = areas_by_id.get(rack.area_id) if rack and rack.area_id else None
+        project = projects_by_id.get(dev.project_id)
+        devices.append(
+            {
+                "id": dev.id,
+                "project_id": dev.project_id,
+                "project_name": project.name if project else None,
+                "name": dev.name,
+                "hostname": dev.hostname,
+                "vendor": dev.vendor,
+                "model": dev.model,
+                "serial": dev.serial,
+                "asset_tag": dev.asset_tag,
+                "device_type": dev.device_type,
+                "rack_id": dev.rack_id,
+                "rack_name": rack.name if rack else None,
+                "row_id": rack.row_id if rack else None,
+                "row_name": (row.name if row else None) or (rack.row_label if rack else None),
+                "area_id": rack.area_id if rack else None,
+                "area_name": area.name if area else None,
+                "ru_start": dev.ru_start,
+                "ru_end": dev.ru_end,
+            }
+        )
+
+    return {"q": needle, "projects": projects, "areas": areas, "rows": rows, "racks": racks, "devices": devices}
+
+
 @ops_router.post("/imports/preview")
 async def preview_inventory_import(
     file: UploadFile = File(...),
