@@ -694,16 +694,16 @@ export default function Project() {
                     </div>
                   </span>
                 </button>
+                <SavedRestrictionPicker
+                  name={`row-restriction-${r.id}`}
+                  entity={r}
+                  scope="row"
+                  compact
+                  inline
+                  inherited={inheritedPhotoBlockers({ project })}
+                  onPersist={(type) => persistRowRestriction(r, type)}
+                />
               </div>
-              <SavedRestrictionPicker
-                name={`row-restriction-${r.id}`}
-                entity={r}
-                scope="row"
-                compact
-                inline
-                inherited={inheritedPhotoBlockers({ project })}
-                onPersist={(type) => persistRowRestriction(r, type)}
-              />
               <button type="button" className="btn" onClick={() => setOpenRow(openRow === r.id ? null : r.id)}>
                 Photos
               </button>
@@ -875,16 +875,16 @@ export default function Project() {
                     </div>
                   </span>
                 </Link>
+                <SavedRestrictionPicker
+                  name={`rack-restriction-${r.id}`}
+                  entity={r}
+                  scope="rack"
+                  compact
+                  inline
+                  inherited={inheritedPhotoBlockers({ project, row: parentRow })}
+                  onPersist={(type) => persistRackRestriction(r, type)}
+                />
               </div>
-              <SavedRestrictionPicker
-                name={`rack-restriction-${r.id}`}
-                entity={r}
-                scope="rack"
-                compact
-                inline
-                inherited={inheritedPhotoBlockers({ project, row: parentRow })}
-                onPersist={(type) => persistRackRestriction(r, type)}
-              />
             </div>
             {editingRack?.id === r.id && (
               <form
