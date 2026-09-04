@@ -14,6 +14,7 @@ import {
 import CameraModal from "./CameraModal";
 import PhotoGallery from "./PhotoGallery";
 import RestrictionPicker from "./RestrictionPicker";
+import { fieldsFromOcr, readImageText, type OcrDeviceFields } from "../ocr";
 import { deviceRestrictionFields, inheritedPhotoBlockers, photosAllowed, restrictionTypeOf } from "../restriction";
 
 export type DeviceDraft = {
@@ -237,7 +238,17 @@ function Combo({
   );
 }
 
-function PendingThumbs({ files, onRemove }: { files: File[]; onRemove: (index: number) => void }) {
+function PendingThumbs({
+  files,
+  onRemove,
+  onFill,
+  fillingIndex,
+}: {
+  files: File[];
+  onRemove: (index: number) => void;
+  onFill?: (file: File) => void;
+  fillingIndex?: number | null;
+}) {
   const [urls, setUrls] = useState<string[]>([]);
   useEffect(() => {
     const next = files.map((f) => URL.createObjectURL(f));
@@ -250,6 +261,11 @@ function PendingThumbs({ files, onRemove }: { files: File[]; onRemove: (index: n
       {files.map((file, idx) => (
         <div className="thumb" key={`${file.name}-${file.size}-${idx}`}>
           {urls[idx] ? <img src={urls[idx]} alt={file.name} /> : <span className="muted">{file.name}</span>}
+          {onFill ? (
+            <button type="button" className="btn" disabled={fillingIndex != null} onClick={() => onFill(file)}>
+              {fillingIndex === idx ? "Reading…" : "Fill fields"}
+            </button>
+          ) : null}
           <button type="button" className="btn" onClick={() => onRemove(idx)}>
             Remove
           </button>
@@ -304,6 +320,14 @@ type Props = {
   catalogNonce?: number;
 };
 
+const OCR_FIELD_LABELS: { key: keyof OcrDeviceFields; label: string }[] = [
+  { key: "serial", label: "Serial" },
+  { key: "asset_tag", label: "Asset tag" },
+  { key: "hostname", label: "Hostname" },
+  { key: "model", label: "Model" },
+  { key: "name", label: "Name" },
+];
+
 export function DeviceFields({
   value,
   onChange,
@@ -323,6 +347,10 @@ export function DeviceFields({
 }: Props) {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [cam, setCam] = useState<"scan" | "photo" | null>(null);
+  const [ocrMsg, setOcrMsg] = useState("");
+  const [ocrError, setOcrError] = useState("");
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [fillingPending, setFillingPending] = useState<number | null>(null);
   useEffect(() => {
     loadCatalog(catalogNonce > 0).then(setCatalog);
   }, [catalogNonce]);
@@ -334,6 +362,37 @@ export function DeviceFields({
   }, [catalog, value.vendor]);
   const set = (patch: Partial<DeviceDraft>) => onChange({ ...value, ...patch });
   const knownLocation = showKnownLocation ?? !showLocation;
+
+  async function fillFromPhoto(blob: Blob) {
+    setOcrBusy(true);
+    setOcrMsg("");
+    setOcrError("");
+    try {
+      const fields = fieldsFromOcr(await readImageText(blob));
+      const patch: Partial<DeviceDraft> = {};
+      const filled: string[] = [];
+      for (const { key, label } of OCR_FIELD_LABELS) {
+        const next = fields[key]?.trim();
+        if (!next) continue;
+        if (String(value[key] || "").trim()) continue;
+        patch[key] = next;
+        filled.push(label);
+      }
+      if (filled.length) {
+        set(patch);
+        setOcrMsg(`Filled ${filled.join(", ")} from photo.`);
+      } else if (OCR_FIELD_LABELS.some(({ key }) => fields[key])) {
+        setOcrMsg("Those fields already have values. Clear a field to fill it from the photo.");
+      } else {
+        setOcrError("No serial, asset tag, hostname, or model found in that photo.");
+      }
+    } catch (err) {
+      setOcrError(err instanceof Error ? err.message : "Could not read photo");
+    } finally {
+      setOcrBusy(false);
+      setFillingPending(null);
+    }
+  }
 
   const selectedRack = racks.find((r) => r.id === value.rack_id);
   const selectedRow = rows.find((r) => r.id === selectedRack?.row_id);
@@ -828,6 +887,7 @@ export function DeviceFields({
           entityId={savedDeviceId}
           allowed={photosOk}
           restricted={!photosOk}
+          onReadPhoto={photosOk ? fillFromPhoto : undefined}
         />
       ) : (
         <div>
@@ -837,13 +897,24 @@ export function DeviceFields({
               Capture photo
             </button>
           </div>
-          <p className="muted">Stored in the app after save — not in the phone/tablet gallery.</p>
+          <p className="muted">Stored in the app after save — not in the phone/tablet gallery. Use Fill fields to read a serial or asset tag from a captured photo.</p>
           <PendingThumbs
             files={pendingPhotos || []}
             onRemove={(idx) => onPendingPhotos?.((pendingPhotos || []).filter((_, i) => i !== idx))}
+            onFill={
+              photosOk
+                ? (file) => {
+                    setFillingPending((pendingPhotos || []).indexOf(file));
+                    void fillFromPhoto(file);
+                  }
+                : undefined
+            }
+            fillingIndex={ocrBusy ? fillingPending : null}
           />
         </div>
       )}
+      {ocrMsg && <div className="success">{ocrMsg}</div>}
+      {ocrError && <div className="error">{ocrError}</div>}
 
       {cam && (
         <CameraModal
