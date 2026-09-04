@@ -645,6 +645,7 @@ export type RelocateBody = {
   target_area_id?: number | null;
   target_row_id?: number | null;
   target_rack_id?: number | null;
+  target_ru_start?: number | null;
   include_children?: boolean;
   include_devices?: boolean;
 };
