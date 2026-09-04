@@ -17,7 +17,7 @@ import {
   layoutPath,
   projects,
 } from "../api";
-import { formatAmps, formatHierarchyPower, formatPowerWatts, rackIdsForArea, rackIdsForRow, sumDcAmps, sumPowerWatts } from "../power";
+import { countDevices, formatAmps, formatHierarchyPower, formatPowerWatts, rackIdsForArea, rackIdsForRow, sumDcAmps, sumPowerWatts } from "../power";
 import { DeviceEditorModal, RackHeightField } from "../components/DeviceEditor";
 import ImportWizard from "../components/ImportWizard";
 import LocatePanel from "../components/LocatePanel";
@@ -54,6 +54,10 @@ const TAB_LABELS: Record<Tab, string> = {
   handoffs: "Handoffs",
   lifecycle: "Lifecycle",
 };
+
+function countPhrase(n: number, noun: string) {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
 
 export default function Project() {
   const { id } = useParams();
@@ -491,12 +495,14 @@ export default function Project() {
             }}
           />
           {areas.map((a) => {
-            const nested = aisleRows.filter((r) => r.area_id === a.id).length;
-            const rackCount = racks.filter((r) => r.area_id === a.id || aisleRows.find((row) => row.id === r.row_id)?.area_id === a.id).length;
-            const watts = sumPowerWatts(devices, rackIdsForArea(a.id, racks, aisleRows));
-            const amps = sumDcAmps(devices, rackIdsForArea(a.id, racks, aisleRows));
+            const rowCount = aisleRows.filter((r) => r.area_id === a.id).length;
+            const nestedRackIds = rackIdsForArea(a.id, racks, aisleRows);
+            const rackCount = nestedRackIds.length;
+            const deviceCount = countDevices(devices, nestedRackIds);
+            const watts = sumPowerWatts(devices, nestedRackIds);
+            const amps = sumDcAmps(devices, nestedRackIds);
             return (
-              <div key={a.id}>
+              <div key={a.id} className="list-entry">
                 <div className="list-item">
                   <div className="list-main">
                     <ItemSelect mode={selectMode} group="area-pick" id={a.id} selected={selected} onChange={setSelected} />
@@ -508,7 +514,7 @@ export default function Project() {
                       <span>
                         <strong>{a.name}</strong>
                         <div className="muted">
-                          {nested} row{nested === 1 ? "" : "s"} · {rackCount} rack{rackCount === 1 ? "" : "s"} ·{" "}
+                          {countPhrase(rowCount, "row")} · {countPhrase(rackCount, "rack")} · {countPhrase(deviceCount, "device")} ·{" "}
                           {formatHierarchyPower(watts, amps)} · {restrictionCaption(a)}
                         </div>
                       </span>
@@ -664,12 +670,14 @@ export default function Project() {
             }}
           />
           {rowsForArea.map((r) => {
-            const rackCount = racks.filter((rack) => rack.row_id === r.id).length;
-            const watts = sumPowerWatts(devices, rackIdsForRow(r.id, racks));
-            const amps = sumDcAmps(devices, rackIdsForRow(r.id, racks));
+            const nestedRackIds = rackIdsForRow(r.id, racks);
+            const rackCount = nestedRackIds.length;
+            const deviceCount = countDevices(devices, nestedRackIds);
+            const watts = sumPowerWatts(devices, nestedRackIds);
+            const amps = sumDcAmps(devices, nestedRackIds);
             const parentArea = areas.find((a) => a.id === r.area_id);
             return (
-            <div key={r.id}>
+            <div key={r.id} className="list-entry">
             <div className="list-item">
               <div className="list-main">
                 <ItemSelect mode={selectMode} group="row-pick" id={r.id} selected={selected} onChange={setSelected} />
@@ -681,24 +689,25 @@ export default function Project() {
                   <span>
                     <strong>{r.name}</strong>
                     <div className="muted">
-                      {parentArea?.name || "no area"} · {rackCount} rack
-                      {rackCount === 1 ? "" : "s"} · {formatHierarchyPower(watts, amps)} · {restrictionCaption(r)}
+                      {parentArea?.name || "no area"} · {countPhrase(rackCount, "rack")} · {countPhrase(deviceCount, "device")} ·{" "}
+                      {formatHierarchyPower(watts, amps)} · {restrictionCaption(r)}
                     </div>
                   </span>
                 </button>
               </div>
+              <SavedRestrictionPicker
+                name={`row-restriction-${r.id}`}
+                entity={r}
+                scope="row"
+                compact
+                inline
+                inherited={inheritedPhotoBlockers({ project })}
+                onPersist={(type) => persistRowRestriction(r, type)}
+              />
               <button type="button" className="btn" onClick={() => setOpenRow(openRow === r.id ? null : r.id)}>
                 Photos
               </button>
             </div>
-            <SavedRestrictionPicker
-              name={`row-restriction-${r.id}`}
-              entity={r}
-              scope="row"
-              compact
-              inherited={inheritedPhotoBlockers({ project })}
-              onPersist={(type) => persistRowRestriction(r, type)}
-            />
             {editingRow?.id === r.id && (
               <form
                 className="card"
@@ -847,8 +856,9 @@ export default function Project() {
           />
           {racksForRow.map((r) => {
             const parentRow = aisleRows.find((row) => row.id === r.row_id);
+            const deviceCount = countDevices(devices, [r.id]);
             return (
-            <div key={r.id}>
+            <div key={r.id} className="list-entry">
             <div className="list-item">
               <div className="list-main">
                 <ItemSelect mode={selectMode} group="rack-pick" id={r.id} selected={selected} onChange={setSelected} />
@@ -859,21 +869,23 @@ export default function Project() {
                   <span>
                     <strong>{r.name}</strong>
                     <div className="muted">
-                      {layoutPath(r, aisleRows, areas)} · {r.ru_height}U · {formatHierarchyPower(sumPowerWatts(devices, [r.id]), sumDcAmps(devices, [r.id]))} ·{" "}
+                      {layoutPath(r, aisleRows, areas)} · {r.ru_height}U · {countPhrase(deviceCount, "device")} ·{" "}
+                      {formatHierarchyPower(sumPowerWatts(devices, [r.id]), sumDcAmps(devices, [r.id]))} ·{" "}
                       {restrictionCaption(r)}
                     </div>
                   </span>
                 </Link>
               </div>
+              <SavedRestrictionPicker
+                name={`rack-restriction-${r.id}`}
+                entity={r}
+                scope="rack"
+                compact
+                inline
+                inherited={inheritedPhotoBlockers({ project, row: parentRow })}
+                onPersist={(type) => persistRackRestriction(r, type)}
+              />
             </div>
-            <SavedRestrictionPicker
-              name={`rack-restriction-${r.id}`}
-              entity={r}
-              scope="rack"
-              compact
-              inherited={inheritedPhotoBlockers({ project, row: parentRow })}
-              onPersist={(type) => persistRackRestriction(r, type)}
-            />
             {editingRack?.id === r.id && (
               <form
                 className="card"

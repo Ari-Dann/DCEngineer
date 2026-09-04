@@ -250,6 +250,19 @@ button.linkish {
   padding: 12px 0; border-bottom: 1px solid var(--border);
 }
 .list-item:last-child { border-bottom: 0; }
+.list-entry {
+  border-top: 1px solid var(--border);
+}
+.list-entry > .list-item {
+  border-bottom: 0;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  padding: 12px 0;
+}
+.list-entry > .list-item > .btn {
+  align-self: flex-start;
+  margin-top: 2px;
+}
 
 .check-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; }
 .check-row input { width: 22px; height: 22px; margin-top: 2px; }
@@ -257,6 +270,26 @@ button.linkish {
 .restriction-picker { margin: 0 0 12px; }
 .restriction-picker.compact { margin: 4px 0 12px; }
 .restriction-picker.compact .switch-row { font-weight: 500; padding: 4px 0; }
+.restriction-picker.inline {
+  margin: 0;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.restriction-picker.inline .switch-row {
+  padding: 2px 0;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.restriction-picker.inline .restriction-choices {
+  margin: 6px 0 0;
+  min-width: 168px;
+  grid-template-columns: 1fr;
+}
+.restriction-picker.inline .restriction-choices .check-row {
+  padding: 6px 10px;
+}
 .switch-row {
   display: flex; align-items: center; gap: 12px;
   padding: 8px 0; cursor: pointer; font-weight: 600;

@@ -47,8 +47,23 @@ export function rackIdsForArea(areaId: number, racks: Rack[], rows: AisleRow[]):
     .map((r) => r.id);
 }
 
+function allowedRackIds(rackIds?: Iterable<number>): Set<number> | null {
+  if (rackIds == null) return null;
+  return rackIds instanceof Set ? rackIds : new Set(rackIds);
+}
+
+export function countDevices(devices: Device[], rackIds?: Iterable<number>): number {
+  const allow = allowedRackIds(rackIds);
+  let total = 0;
+  for (const device of devices) {
+    if (allow && (device.rack_id == null || !allow.has(device.rack_id))) continue;
+    total += 1;
+  }
+  return total;
+}
+
 export function sumPowerWatts(devices: Device[], rackIds?: Iterable<number>): number {
-  const allow = rackIds == null ? null : rackIds instanceof Set ? rackIds : new Set(rackIds);
+  const allow = allowedRackIds(rackIds);
   let total = 0;
   for (const device of devices) {
     if (allow && (device.rack_id == null || !allow.has(device.rack_id))) continue;
@@ -58,7 +73,7 @@ export function sumPowerWatts(devices: Device[], rackIds?: Iterable<number>): nu
 }
 
 export function sumDcAmps(devices: Device[], rackIds?: Iterable<number>): number {
-  const allow = rackIds == null ? null : rackIds instanceof Set ? rackIds : new Set(rackIds);
+  const allow = allowedRackIds(rackIds);
   let total = 0;
   for (const device of devices) {
     if (allow && (device.rack_id == null || !allow.has(device.rack_id))) continue;
