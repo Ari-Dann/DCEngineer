@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
+import { recognizeLabel } from "../ocr";
 
 type Mode = "scan" | "photo";
 
@@ -6,6 +7,7 @@ type Props = {
   mode: Mode;
   title?: string;
   initialHint?: string;
+  ocr?: boolean;
   onClose: () => void;
   onScan?: (value: string) => void;
   onPhoto?: (file: File) => void;
@@ -15,16 +17,22 @@ type DetectorCtor = new (opts: { formats: string[] }) => {
   detect: (source: ImageBitmapSource) => Promise<{ rawValue: string }[]>;
 };
 
-export default function CameraModal({ mode, title, initialHint, onClose, onScan, onPhoto }: Props) {
+export default function CameraModal({ mode, title, initialHint, ocr = false, onClose, onScan, onPhoto }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<number | null>(null);
   const [error, setError] = useState("");
   const [hint, setHint] = useState(
     initialHint ??
-      (mode === "scan" ? "Point the camera at the barcode or QR code" : "Frame the equipment, then capture"),
+      (mode === "scan"
+        ? ocr
+          ? "Point the camera at a barcode, QR code, or printed serial"
+          : "Point the camera at the barcode or QR code"
+        : "Frame the equipment, then capture"),
   );
   const [busy, setBusy] = useState(false);
+  const [hasVideo, setHasVideo] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,9 +52,14 @@ export default function CameraModal({ mode, title, initialHint, onClose, onScan,
           video.srcObject = stream;
           await video.play();
         }
+        setHasVideo(true);
         if (mode === "scan") startScan();
       } catch (err) {
+        setHasVideo(false);
         setError(err instanceof Error ? err.message : "Camera permission denied");
+        if (ocr && mode === "scan") {
+          setHint("No camera in this browser. Use a photo of the barcode, QR code, or printed label.");
+        }
       }
     })();
     return () => {
@@ -67,7 +80,11 @@ export default function CameraModal({ mode, title, initialHint, onClose, onScan,
   function startScan() {
     const Detector = (window as unknown as { BarcodeDetector?: DetectorCtor }).BarcodeDetector;
     if (!Detector) {
-      setHint("Live barcode detection is not available in this browser. Keep this window open to line up the tag, then type the code.");
+      setHint(
+        ocr
+          ? "Live barcode detection is not available. Frame the label and tap Read text, or use a photo."
+          : "Live barcode detection is not available in this browser. Keep this window open to line up the tag, then type the code.",
+      );
       return;
     }
     let detector: InstanceType<DetectorCtor>;
@@ -76,7 +93,11 @@ export default function CameraModal({ mode, title, initialHint, onClose, onScan,
         formats: ["code_128", "code_39", "code_93", "codabar", "ean_13", "ean_8", "upc_a", "upc_e", "qr_code", "itf", "data_matrix"],
       });
     } catch {
-      setHint("This browser opened the camera but cannot decode barcodes. Line up the tag, then type the code.");
+      setHint(
+        ocr
+          ? "This browser cannot decode barcodes live. Frame the label and tap Read text, or use a photo."
+          : "This browser opened the camera but cannot decode barcodes. Line up the tag, then type the code.",
+      );
       return;
     }
     timerRef.current = window.setInterval(async () => {
@@ -120,11 +141,68 @@ export default function CameraModal({ mode, title, initialHint, onClose, onScan,
     }
   }
 
+  async function frameBlob(): Promise<Blob> {
+    const video = videoRef.current;
+    if (!video || video.readyState < 2 || !video.videoWidth) {
+      throw new Error("Camera is not ready");
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas unavailable");
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Capture failed"))), "image/jpeg", 0.92);
+    });
+  }
+
+  async function finishScan(value: string) {
+    const next = value.trim();
+    if (!next) {
+      setError("No barcode, QR, or readable text found. Move closer or type it.");
+      return;
+    }
+    stop();
+    onScan?.(next);
+    onClose();
+  }
+
+  async function readTextFromCamera() {
+    setBusy(true);
+    setError("");
+    try {
+      const blob = await frameBlob();
+      await finishScan(await recognizeLabel(blob));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read text");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function readTextFromFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setBusy(true);
+    setError("");
+    try {
+      await finishScan(await recognizeLabel(file));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read text");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const scanTitle = ocr ? "Scan barcode, QR, or text" : "Scan barcode or QR";
+
   return (
     <div className="overlay" role="dialog" aria-modal="true">
       <div className="camera-sheet">
         <div className="camera-head">
-          <strong>{title ?? (mode === "scan" ? "Scan barcode or QR" : "Capture photo")}</strong>
+          <strong>{title ?? (mode === "scan" ? scanTitle : "Capture photo")}</strong>
           <button type="button" className="btn" onClick={() => { stop(); onClose(); }}>Close</button>
         </div>
         {error && <div className="error">{error}</div>}
@@ -134,14 +212,32 @@ export default function CameraModal({ mode, title, initialHint, onClose, onScan,
         </div>
         <p className="muted">{hint}</p>
         <p className="muted">Photos stay in DCEngineer. Nothing is written to the device gallery.</p>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div className="camera-actions">
           {mode === "photo" && (
             <button type="button" className="btn primary block" disabled={busy} onClick={captureStill}>
               {busy ? "Saving…" : "Capture"}
             </button>
           )}
+          {mode === "scan" && ocr && (
+            <>
+              <button type="button" className="btn primary block" disabled={busy || !hasVideo} onClick={readTextFromCamera}>
+                {busy ? "Reading text…" : "Read text"}
+              </button>
+              <button type="button" className="btn block" disabled={busy} onClick={() => fileRef.current?.click()}>
+                Use a photo
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                hidden
+                onChange={readTextFromFile}
+              />
+            </>
+          )}
           {mode === "scan" && (
-            <button type="button" className="btn block" onClick={() => { stop(); onClose(); }}>
+            <button type="button" className="btn block" disabled={busy} onClick={() => { stop(); onClose(); }}>
               Type it instead
             </button>
           )}
