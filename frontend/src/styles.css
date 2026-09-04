@@ -220,7 +220,9 @@ tr:hover td { background: var(--bg-hover); }
 .dev-switch { background: color-mix(in srgb, var(--accent-2) 35%, var(--bg-elev)); }
 .dev-router { background: color-mix(in srgb, #5ec8e8 40%, var(--bg-elev)); }
 .dev-firewall { background: color-mix(in srgb, #e87a4c 40%, var(--bg-elev)); }
-.dev-storage { background: color-mix(in srgb, var(--purple) 35%, var(--bg-elev)); }
+.dev-storage, .dev-nas { background: color-mix(in srgb, var(--purple) 35%, var(--bg-elev)); }
+.dev-chassis, .dev-blade-chassis { background: color-mix(in srgb, #5b6fd6 40%, var(--bg-elev)); }
+.dev-shelf, .dev-enclosure { background: color-mix(in srgb, #7a6ad6 35%, var(--bg-elev)); }
 .dev-pdu { background: color-mix(in srgb, var(--warn) 30%, var(--bg-elev)); }
 .dev-ups { background: color-mix(in srgb, var(--danger) 30%, var(--bg-elev)); }
 .dev-other { background: var(--bg-hover); }
@@ -267,7 +269,7 @@ button.linkish {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   grid-template-rows: auto auto;
-  align-items: center;
+  align-items: start;
   column-gap: 12px;
   row-gap: 2px;
   min-width: 0;

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import Area, Cable, Device, Handoff, PDU, PDUPort, Project, Rack
-from app.nesting import nested_count_for, occupies_elevation
+from app.nesting import elevation_occupants, nested_count_for
 
 
 HEADER_FILL = PatternFill("solid", fgColor="1B3A4B")
@@ -306,6 +306,11 @@ def rack_svg(rack: Rack, devices: list[Device]) -> str:
         "firewall": "#e87a4c",
         "router": "#5ec8e8",
         "storage": "#9b7dff",
+        "nas": "#9b7dff",
+        "chassis": "#5b6fd6",
+        "blade chassis": "#5b6fd6",
+        "shelf": "#7a6ad6",
+        "enclosure": "#6a7ad6",
         "pdu": "#e8a317",
         "ups": "#e85d4c",
         "other": "#8b9bb0",
@@ -315,14 +320,7 @@ def rack_svg(rack: Rack, devices: list[Device]) -> str:
         f'<rect width="{width}" height="{height}" fill="#0b0f14"/>',
         f'<text x="12" y="22" fill="#e8eef6" font-family="sans-serif" font-size="14">{_esc(rack.name)} — {ru}U</text>',
     ]
-    occupied: dict[int, Device] = {}
-    for dev in devices:
-        if not occupies_elevation(dev):
-            continue
-        start = int(dev.ru_start)
-        end = int(dev.ru_end or dev.ru_start)
-        for u in range(min(start, end), max(start, end) + 1):
-            occupied[u] = dev
+    occupied = elevation_occupants(devices)
     for u in range(ru, 0, -1):
         y = 32 + (ru - u) * row_h
         parts.append(

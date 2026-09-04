@@ -182,6 +182,8 @@ def test_catalog_edit_import_search_photos(client, auth):
     assert catalog.status_code == 200, catalog.text
     body = catalog.json()
     assert "router" in body["device_types"]
+    for expected in ("nas", "chassis", "blade chassis", "shelf", "enclosure"):
+        assert expected in body["device_types"]
     assert any(t["id"] == "led" for t in body["indicator_types"])
     assert any(c["id"] == "green" for c in body["indicator_colors"])
     names = [v["name"] for v in body["vendors"]]
@@ -2078,6 +2080,81 @@ def test_import_nests_chassis_components_and_same_u_shelf(client, auth):
     }
     assert parents["SN-BLADE-A"] == "Cisco UCS-SP-5108-AC"
     assert parents["SN-DISK-1"] == "Disk shelf DS4246"
+
+
+def test_elevation_and_move_prefer_largest_shared_u(client, auth):
+    project = client.post("/api/projects", headers=auth, json={"name": "Overlap U"}).json()
+    pid = project["id"]
+    rack = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "A01", "ru_height": 42},
+    ).json()
+    large = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={
+            "name": "UCS chassis",
+            "device_type": "chassis",
+            "rack_id": rack["id"],
+            "ru_start": 10,
+            "ru_end": 20,
+            "serial": "CH-BIG",
+        },
+    ).json()
+    small = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={
+            "name": "leaf-sw",
+            "device_type": "switch",
+            "rack_id": rack["id"],
+            "ru_start": 18,
+            "ru_end": 24,
+            "serial": "SW-SMALL",
+        },
+    ).json()
+    assert small["parent_device_id"] is None
+    elev = client.get(f"/api/projects/{pid}/racks/{rack['id']}/elevation", headers=auth).json()
+    by_u = {s["u"]: s["device_id"] for s in elev["slots"]}
+    assert by_u[10] == large["id"]
+    assert by_u[18] == large["id"]
+    assert by_u[20] == large["id"]
+    assert by_u[21] == small["id"]
+    assert by_u[24] == small["id"]
+
+    other = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "B01", "ru_height": 42},
+    ).json()
+    client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={
+            "name": "NetApp",
+            "device_type": "nas",
+            "rack_id": other["id"],
+            "ru_start": 5,
+            "ru_end": 16,
+            "serial": "NAS-1",
+        },
+    )
+    moved = client.post(
+        f"/api/projects/{pid}/devices/{small['id']}/move",
+        headers=auth,
+        json={"target_project_id": pid, "target_rack_id": other["id"], "target_ru_start": 10},
+    )
+    assert moved.status_code == 200, moved.text
+    dest_elev = client.get(f"/api/projects/{pid}/racks/{other['id']}/elevation", headers=auth).json()
+    dest_by_u = {s["u"]: s["device_id"] for s in dest_elev["slots"]}
+    nas = next(d for d in dest_elev["devices"] if d["serial"] == "NAS-1")
+    moved_sw = next(d for d in dest_elev["devices"] if d["id"] == small["id"])
+    assert moved_sw["parent_device_id"] == nas["id"]
+    assert dest_by_u[5] == nas["id"]
+    assert dest_by_u[10] == nas["id"]
+    assert dest_by_u[16] == nas["id"]
+    assert small["id"] not in dest_by_u.values()
 
 
 def test_create_update_nests_and_copy_move_preserve_parent(client, auth):

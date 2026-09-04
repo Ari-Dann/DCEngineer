@@ -16,8 +16,24 @@ export type Catalog = {
   fields?: CatalogField[];
 };
 
+export const DEFAULT_DEVICE_TYPES = [
+  "server",
+  "switch",
+  "router",
+  "firewall",
+  "storage",
+  "nas",
+  "chassis",
+  "blade chassis",
+  "shelf",
+  "enclosure",
+  "pdu",
+  "ups",
+  "other",
+];
+
 const FALLBACK: Catalog = {
-  device_types: ["server", "switch", "router", "firewall", "storage", "pdu", "ups", "other"],
+  device_types: DEFAULT_DEVICE_TYPES,
   fan_orientations: [
     { id: "front-intake", label: "Front intake (correct cold aisle)" },
     { id: "rear-intake", label: "Rear intake" },

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Catalog, OTHER, learnCatalog, loadCatalog } from "../catalog";
+import { Catalog, DEFAULT_DEVICE_TYPES, OTHER, learnCatalog, loadCatalog } from "../catalog";
 import { AisleRow, Area, Device, PDU, Project, Rack, pduLabel, projects, uploadPhotos } from "../api";
 import {
   displayFromWatts,
@@ -513,7 +513,7 @@ export function DeviceFields({
         <Combo
           label="Type"
           allowEmpty
-          options={catalog?.device_types ?? ["server", "switch", "router", "firewall", "other"]}
+          options={catalog?.device_types ?? DEFAULT_DEVICE_TYPES}
           value={value.device_type}
           onChange={(device_type) => set({ device_type })}
           onCommit={(device_type) => persist({ device_type })}

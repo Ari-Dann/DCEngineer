@@ -246,8 +246,8 @@ export default function ImportWizard({
           Choose a project, then map spreadsheet columns (or rows) onto device and layout fields. A Location column such as{" "}
           <code>A12 R09-RU19</code> can be mapped to “Location (parse row / rack / RU)” and is split into row A12, rack 09,
           and RU 19. Standalone U ranges like <code>U32-U38</code> or <code>U34</code> also parse as RU start/end. Chassis,
-          shelf, and enclosure rows keep the U range on the elevation; components that share or sit inside that range nest
-          under the parent instead of overlapping. Import follows Area → Row → Rack → Device and will not move populated
+          shelf, NAS, and enclosure rows keep the U range on the elevation; components that share or sit inside that range nest
+          under the parent instead of overlapping. When several devices still share a U, the largest item is the one shown. Import follows Area → Row → Rack → Device and will not move populated
           items into a different parent. Empty cells do not blank fields that are already filled. CSV, XLSX, and ODS are
           supported.
         </p>
@@ -335,7 +335,7 @@ export default function ImportWizard({
               {sheet.record_count} record{sheet.record_count === 1 ? "" : "s"} on “{sheet.name}”. Map each spreadsheet
               heading to a DCEngineer field, or leave as skip.
               {locationMapped
-                ? " Location values like A12 R09-RU19 or U32-U38 become row, rack, and RU unless those columns are mapped separately. Chassis and shelf components nest instead of overlapping."
+                ? " Location values like A12 R09-RU19 or U32-U38 become row, rack, and RU unless those columns are mapped separately. Chassis, shelf, and NAS components nest instead of overlapping; the largest item still paints a shared U."
                 : ""}
             </p>
             <div className="table-wrap">
