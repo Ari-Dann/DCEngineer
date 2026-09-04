@@ -520,7 +520,8 @@ tr.clickable { cursor: pointer; }
 }
 .thumb img { width: 100%; height: 96px; object-fit: cover; display: block; cursor: pointer; }
 .thumb .btn { width: 100%; border-radius: 0; min-height: 36px; }
-.lightbox { max-width: 96vw; max-height: 90vh; border-radius: 12px; }
+.lightbox-card { display: grid; gap: 10px; justify-items: center; max-width: 96vw; }
+.lightbox { max-width: 96vw; max-height: 80vh; border-radius: 12px; }
 .choice.compact { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); }
 .choice.compact button { min-height: 40px; }
 .audit-block {
