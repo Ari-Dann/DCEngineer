@@ -243,6 +243,13 @@ export const projects = {
 
 export const ops = {
   dashboard: () => api<Dashboard>("/api/dashboard"),
+  search: (q = "", projectId?: number) => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (projectId) params.set("project_id", String(projectId));
+    const qs = params.toString();
+    return api<GlobalSearch>(`/api/search${qs ? `?${qs}` : ""}`);
+  },
   inspections: (project_id?: number) => api<Inspection[]>(`/api/inspections${project_id ? `?project_id=${project_id}` : ""}`),
   addInspection: (body: Partial<Inspection> & { title: string }) =>
     api<Inspection>("/api/inspections", { method: "POST", body: JSON.stringify(body) }),
@@ -301,6 +308,67 @@ export type Attachment = {
 
 export type SearchHit = Device & { rack_name?: string | null; rack_row?: string | null; area_name?: string | null };
 export type SearchResult = { query: string; count: number; devices: SearchHit[] };
+export type GlobalSearchProject = {
+  id: number;
+  name: string;
+  customer: string;
+  site_name: string;
+  status: string;
+};
+export type GlobalSearchArea = {
+  id: number;
+  name: string;
+  project_id: number;
+  project_name: string;
+  description: string;
+};
+export type GlobalSearchRow = {
+  id: number;
+  name: string;
+  project_id: number;
+  project_name: string;
+  area_id?: number | null;
+  area_name?: string | null;
+};
+export type GlobalSearchRack = {
+  id: number;
+  name: string;
+  project_id: number;
+  project_name: string;
+  area_id?: number | null;
+  area_name?: string | null;
+  row_id?: number | null;
+  row_name?: string | null;
+  ru_height: number;
+};
+export type GlobalSearchDevice = {
+  id: number;
+  project_id: number;
+  project_name?: string | null;
+  name: string;
+  hostname: string;
+  vendor: string;
+  model: string;
+  serial: string;
+  asset_tag: string;
+  device_type: string;
+  rack_id?: number | null;
+  rack_name?: string | null;
+  row_id?: number | null;
+  row_name?: string | null;
+  area_id?: number | null;
+  area_name?: string | null;
+  ru_start?: number | null;
+  ru_end?: number | null;
+};
+export type GlobalSearch = {
+  q: string;
+  projects: GlobalSearchProject[];
+  areas: GlobalSearchArea[];
+  rows: GlobalSearchRow[];
+  racks: GlobalSearchRack[];
+  devices: GlobalSearchDevice[];
+};
 export type ImportResult = {
   created: number;
   updated: number;

@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { getSession, logout } from "./api";
 import Home from "./pages/Home";
@@ -10,17 +10,71 @@ import Capture from "./pages/Capture";
 import VisionSession from "./pages/VisionSession";
 import Work from "./pages/Work";
 import Ops from "./pages/Ops";
+import Search from "./pages/Search";
 import Settings from "./pages/Settings";
 import ErrorBoundary from "./components/ErrorBoundary";
 
 const SIDEBAR_KEY = "dce-sidebar";
 const DESKTOP_NAV = "(min-width: 900px)";
 
+const SEARCH_ICON = "M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z";
+
 function Icon({ d }: { d: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d={d} />
     </svg>
+  );
+}
+
+function TopSearch() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [q, setQ] = useState("");
+
+  useEffect(() => {
+    if (location.pathname === "/search") {
+      setQ(new URLSearchParams(location.search).get("q") || "");
+    }
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (location.pathname === "/search") inputRef.current?.focus();
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (location.pathname !== "/search") return;
+    const current = new URLSearchParams(location.search).get("q") || "";
+    if (q.trim() === current.trim()) return;
+    const handle = window.setTimeout(() => {
+      const next = q.trim();
+      navigate(next ? `/search?q=${encodeURIComponent(next)}` : "/search", { replace: true });
+    }, 280);
+    return () => window.clearTimeout(handle);
+  }, [q, location.pathname, location.search, navigate]);
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    const next = q.trim();
+    navigate(next ? `/search?q=${encodeURIComponent(next)}` : "/search");
+  }
+
+  return (
+    <form className="top-search" onSubmit={onSubmit} role="search">
+      <Icon d={SEARCH_ICON} />
+      <input
+        ref={inputRef}
+        type="search"
+        name="q"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search"
+        aria-label="Search"
+        autoComplete="off"
+        enterKeyHint="search"
+      />
+    </form>
   );
 }
 
@@ -54,6 +108,7 @@ function Layout({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpen);
   const items = [
     { to: "/", label: "Home", d: "M4 10.5 12 4l8 6.5V20H4z" },
+    { to: "/search", label: "Search", d: SEARCH_ICON },
     { to: "/capture", label: "New Device", d: "M4 7h4l2-2h4l2 2h4v12H4z M12 10a3 3 0 1 1 0 6 3 3 0 0 1 0-6z" },
     { to: "/projects", label: "Project", d: "M4 20V4h6v16H4zm10-10h6v10h-6z" },
     { to: "/work", label: "Work", d: "M9 5h6l2 3h5v12H2V8h5z" },
@@ -100,7 +155,7 @@ function Layout({ children }: { children: ReactNode }) {
         <div className="sidebar-head">
           <div className="brand">
             <img src="/icon.svg" alt="" />
-            DCEngineer
+            <span className="brand-text">DCEngineer</span>
           </div>
           <button type="button" className="btn sidebar-close" onClick={toggleSidebar} aria-label="Hide menu">
             Hide
@@ -146,10 +201,10 @@ function Layout({ children }: { children: ReactNode }) {
           </button>
           <div className="brand">
             <img src="/icon.svg" alt="" />
-            DCEngineer
+            <span className="brand-text">DCEngineer</span>
           </div>
-          <div className="grow" />
-          <span className="muted">{session?.username}</span>
+          <TopSearch />
+          <span className="muted topbar-user">{session?.username}</span>
         </header>
         <ErrorBoundary>{children}</ErrorBoundary>
         <nav className="nav">
@@ -181,6 +236,7 @@ export default function App() {
       <Route path="/capture" element={<Private><Capture /></Private>} />
       <Route path="/capture/vision/:id" element={<Private><VisionSession /></Private>} />
       <Route path="/work" element={<Private><Work /></Private>} />
+      <Route path="/search" element={<Private><Search /></Private>} />
       <Route path="/ops" element={<Private><Ops /></Private>} />
       <Route path="/settings" element={<Private><Settings /></Private>} />
     </Routes>

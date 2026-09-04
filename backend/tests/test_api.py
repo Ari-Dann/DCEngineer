@@ -2157,6 +2157,63 @@ def test_elevation_and_move_prefer_largest_shared_u(client, auth):
     assert small["id"] not in dest_by_u.values()
 
 
+def test_global_search_finds_layout_and_devices(client, auth):
+    project = client.post(
+        "/api/projects",
+        headers=auth,
+        json={"name": "Search Lab", "customer": "Globex", "site_name": "DC-West"},
+    ).json()
+    pid = project["id"]
+    area = client.post(f"/api/projects/{pid}/areas", headers=auth, json={"name": "Hall Search"}).json()
+    row = client.post(
+        f"/api/projects/{pid}/rows",
+        headers=auth,
+        json={"name": "Row-S1", "area_id": area["id"]},
+    ).json()
+    rack = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "R-Search", "row_id": row["id"], "area_id": area["id"]},
+    ).json()
+    device = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={"name": "core-sw-search", "serial": "SN-SEARCH-99", "rack_id": rack["id"]},
+    ).json()
+
+    empty = client.get("/api/search", headers=auth, params={"q": ""})
+    assert empty.status_code == 200
+    assert empty.json() == {"q": "", "projects": [], "areas": [], "rows": [], "racks": [], "devices": []}
+
+    by_project = client.get("/api/search", headers=auth, params={"q": "Search Lab"})
+    assert by_project.status_code == 200, by_project.text
+    assert any(p["id"] == pid for p in by_project.json()["projects"])
+
+    by_customer = client.get("/api/search", headers=auth, params={"q": "Globex"})
+    assert any(p["id"] == pid for p in by_customer.json()["projects"])
+
+    by_area = client.get("/api/search", headers=auth, params={"q": "Hall Search"})
+    assert any(a["id"] == area["id"] and a["project_name"] == "Search Lab" for a in by_area.json()["areas"])
+
+    by_row = client.get("/api/search", headers=auth, params={"q": "Row-S1"})
+    assert any(r["id"] == row["id"] and r["area_name"] == "Hall Search" for r in by_row.json()["rows"])
+
+    by_rack = client.get("/api/search", headers=auth, params={"q": "R-Search"})
+    rack_hit = next(r for r in by_rack.json()["racks"] if r["id"] == rack["id"])
+    assert rack_hit["row_name"] == "Row-S1"
+    assert rack_hit["project_name"] == "Search Lab"
+
+    by_serial = client.get("/api/search", headers=auth, params={"q": "SN-SEARCH-99"})
+    hit = next(d for d in by_serial.json()["devices"] if d["id"] == device["id"])
+    assert hit["name"] == "core-sw-search"
+    assert hit["rack_name"] == "R-Search"
+    assert hit["project_name"] == "Search Lab"
+
+    scoped = client.get("/api/search", headers=auth, params={"q": "Search Lab", "project_id": pid})
+    assert scoped.status_code == 200
+    assert all(p["id"] == pid for p in scoped.json()["projects"])
+
+
 def test_create_update_nests_and_copy_move_preserve_parent(client, auth):
     project = client.post("/api/projects", headers=auth, json={"name": "Nest editor"}).json()
     pid = project["id"]
