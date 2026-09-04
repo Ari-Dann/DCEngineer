@@ -27,6 +27,8 @@ build/
 node_modules/
 frontend/dist/
 frontend/dev-dist/
+*.traineddata
+*.traineddata.gz
 
 # Android / Capacitor
 android/.gradle/

@@ -116,7 +116,7 @@ export default function Search() {
   return (
     <div className="page">
       <h1>Search</h1>
-      <p>Find projects, areas, rows, racks, and devices across the site. Scan a barcode or QR code to search by that value.</p>
+      <p>Find projects, areas, rows, racks, and devices across the site. Scan a barcode, QR code, or printed serial.</p>
       <form className="search-page-form" onSubmit={onSubmit} role="search">
         <input
           type="search"
@@ -127,7 +127,7 @@ export default function Search() {
           autoComplete="off"
           enterKeyHint="search"
         />
-        <button type="button" className="btn" onClick={() => setScanning(true)} aria-label="Scan barcode or QR code">
+        <button type="button" className="btn" onClick={() => setScanning(true)} aria-label="Scan barcode, QR code, or text">
           Scan
         </button>
         <button className="btn primary" type="submit">
@@ -137,14 +137,17 @@ export default function Search() {
       {scanning && (
         <CameraModal
           mode="scan"
-          title="Scan barcode or QR"
-          initialHint="Point the camera at a barcode or QR code"
+          ocr
+          title="Scan barcode, QR, or text"
+          initialHint="Point the camera at a barcode, QR code, or printed serial. Use Read text for labels."
           onClose={() => setScanning(false)}
           onScan={onScan}
         />
       )}
       {error && <div className="error">{error}</div>}
-      {!searching && <p className="muted">Type a name, serial, hostname, or location, or scan a barcode or QR code.</p>}
+      {!searching && (
+        <p className="muted">Type a name, serial, hostname, or location, or scan a barcode, QR code, or label.</p>
+      )}
       {searching && busy && <p className="muted">Searching…</p>}
       {searching && !busy && total === 0 && !error && (
         <p className="muted">No matches for “{q.trim()}”.</p>
