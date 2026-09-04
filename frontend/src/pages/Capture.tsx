@@ -140,8 +140,8 @@ export default function Capture() {
 
   return (
     <div className="page">
-      <h1>Onsite capture</h1>
-      <p>Phase 2 intake. Create rows under an area (typed or from aisle photos), then capture rack by rack.</p>
+      <h1>New device</h1>
+      <p>Phase 2 intake. Create rows under an area (typed or from aisle photos), then add devices rack by rack.</p>
       {project?.photography_rules && <div className="banner">{project.photography_rules}</div>}
       {project &&
         !photosAllowed({
