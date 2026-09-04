@@ -4,6 +4,8 @@ type Mode = "scan" | "photo";
 
 type Props = {
   mode: Mode;
+  title?: string;
+  initialHint?: string;
   onClose: () => void;
   onScan?: (value: string) => void;
   onPhoto?: (file: File) => void;
@@ -13,12 +15,15 @@ type DetectorCtor = new (opts: { formats: string[] }) => {
   detect: (source: ImageBitmapSource) => Promise<{ rawValue: string }[]>;
 };
 
-export default function CameraModal({ mode, onClose, onScan, onPhoto }: Props) {
+export default function CameraModal({ mode, title, initialHint, onClose, onScan, onPhoto }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<number | null>(null);
   const [error, setError] = useState("");
-  const [hint, setHint] = useState(mode === "scan" ? "Point the camera at the barcode or serial" : "Frame the equipment, then capture");
+  const [hint, setHint] = useState(
+    initialHint ??
+      (mode === "scan" ? "Point the camera at the barcode or QR code" : "Frame the equipment, then capture"),
+  );
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -62,7 +67,7 @@ export default function CameraModal({ mode, onClose, onScan, onPhoto }: Props) {
   function startScan() {
     const Detector = (window as unknown as { BarcodeDetector?: DetectorCtor }).BarcodeDetector;
     if (!Detector) {
-      setHint("Live barcode detection is not available in this browser. Keep this window open to line up the tag, then type the serial.");
+      setHint("Live barcode detection is not available in this browser. Keep this window open to line up the tag, then type the code.");
       return;
     }
     let detector: InstanceType<DetectorCtor>;
@@ -71,7 +76,7 @@ export default function CameraModal({ mode, onClose, onScan, onPhoto }: Props) {
         formats: ["code_128", "code_39", "code_93", "codabar", "ean_13", "ean_8", "upc_a", "upc_e", "qr_code", "itf", "data_matrix"],
       });
     } catch {
-      setHint("This browser opened the camera but cannot decode barcodes. Line up the tag, then type the serial.");
+      setHint("This browser opened the camera but cannot decode barcodes. Line up the tag, then type the code.");
       return;
     }
     timerRef.current = window.setInterval(async () => {
@@ -119,7 +124,7 @@ export default function CameraModal({ mode, onClose, onScan, onPhoto }: Props) {
     <div className="overlay" role="dialog" aria-modal="true">
       <div className="camera-sheet">
         <div className="camera-head">
-          <strong>{mode === "scan" ? "Scan serial" : "Capture photo"}</strong>
+          <strong>{title ?? (mode === "scan" ? "Scan barcode or QR" : "Capture photo")}</strong>
           <button type="button" className="btn" onClick={() => { stop(); onClose(); }}>Close</button>
         </div>
         {error && <div className="error">{error}</div>}

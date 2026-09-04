@@ -6,6 +6,7 @@ import {
   GlobalSearchRack,
   ops,
 } from "../api";
+import CameraModal from "../components/CameraModal";
 import { projectHref, rackHref } from "../nav";
 
 const empty: GlobalSearch = { q: "", projects: [], areas: [], rows: [], racks: [], devices: [] };
@@ -42,6 +43,7 @@ export default function Search() {
   const [result, setResult] = useState<GlobalSearch>(empty);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [scanning, setScanning] = useState(false);
 
   useEffect(() => {
     setDraft(q);
@@ -86,12 +88,21 @@ export default function Search() {
     };
   }, [q]);
 
+  function applyQuery(next: string) {
+    const value = next.trim();
+    setDraft(value);
+    const nextParams = new URLSearchParams();
+    if (value) nextParams.set("q", value);
+    setParams(nextParams);
+  }
+
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    const next = draft.trim();
-    const nextParams = new URLSearchParams();
-    if (next) nextParams.set("q", next);
-    setParams(nextParams);
+    applyQuery(draft);
+  }
+
+  function onScan(value: string) {
+    applyQuery(value);
   }
 
   const total =
@@ -105,7 +116,7 @@ export default function Search() {
   return (
     <div className="page">
       <h1>Search</h1>
-      <p>Find projects, areas, rows, racks, and devices across the site.</p>
+      <p>Find projects, areas, rows, racks, and devices across the site. Scan a barcode or QR code to search by that value.</p>
       <form className="search-page-form" onSubmit={onSubmit} role="search">
         <input
           type="search"
@@ -116,12 +127,24 @@ export default function Search() {
           autoComplete="off"
           enterKeyHint="search"
         />
+        <button type="button" className="btn" onClick={() => setScanning(true)} aria-label="Scan barcode or QR code">
+          Scan
+        </button>
         <button className="btn primary" type="submit">
           Search
         </button>
       </form>
+      {scanning && (
+        <CameraModal
+          mode="scan"
+          title="Scan barcode or QR"
+          initialHint="Point the camera at a barcode or QR code"
+          onClose={() => setScanning(false)}
+          onScan={onScan}
+        />
+      )}
       {error && <div className="error">{error}</div>}
-      {!searching && <p className="muted">Type a name, serial, hostname, or location to start.</p>}
+      {!searching && <p className="muted">Type a name, serial, hostname, or location, or scan a barcode or QR code.</p>}
       {searching && busy && <p className="muted">Searching…</p>}
       {searching && !busy && total === 0 && !error && (
         <p className="muted">No matches for “{q.trim()}”.</p>
