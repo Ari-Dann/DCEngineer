@@ -343,7 +343,7 @@ export default function VisionSessionPage() {
   if (!session) {
     return (
       <div className="page">
-        <Link to="/capture">← Capture</Link>
+        <Link to="/capture">← New Device</Link>
         {error && <div className="error">{error}</div>}
         <p className="muted">Loading session…</p>
       </div>
@@ -355,7 +355,7 @@ export default function VisionSessionPage() {
   return (
     <div className="page">
       <div className="crumb">
-        <Link to="/capture">Capture</Link>
+        <Link to="/capture">New Device</Link>
         <span>/</span>
         <span className="here">Vision #{session.id}</span>
       </div>

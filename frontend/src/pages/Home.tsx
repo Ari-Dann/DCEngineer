@@ -45,8 +45,8 @@ export default function Home() {
       <div className="grid two" style={{ marginTop: 16 }}>
         <div className="card">
           <h3>On the floor</h3>
-          <p>Use Capture for rack-by-rack physical intake. Works as a PWA on tablets and GrapheneOS (Vanadium).</p>
-          <Link className="btn primary" to="/capture">Start capture</Link>
+          <p>Use New Device for rack-by-rack physical intake. Works as a PWA on tablets and GrapheneOS (Vanadium).</p>
+          <Link className="btn primary" to="/capture">New device</Link>
         </div>
         <div className="card">
           <h3>App backup</h3>

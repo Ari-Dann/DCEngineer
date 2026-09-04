@@ -637,7 +637,7 @@ export default function Project() {
           )}
           {rowsForArea.length === 0 && (
             <p className="muted" style={{ marginTop: 12 }}>
-              No rows yet. Add them here or capture a wide aisle shot on Capture and create the suggested names.
+              No rows yet. Add them here or capture a wide aisle shot on New Device and create the suggested names.
             </p>
           )}
           <SelectModeToggle mode={selectMode} onChange={changeSelectMode} />

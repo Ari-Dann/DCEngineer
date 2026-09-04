@@ -1,21 +1,13 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { AisleRow, Area, Device, Elevation, PDU, Project, Rack, downloadAuth, layoutPath, projects, uploadPhotos } from "../api";
+import { AisleRow, Area, Device, Elevation, PDU, Project, Rack, downloadAuth, layoutPath, projects } from "../api";
 import { formatHierarchyPower, sumDcAmps, sumPowerWatts } from "../power";
-import {
-  DeviceDraft,
-  DeviceEditorModal,
-  DeviceFields,
-  RackHeightField,
-  emptyDraft,
-  payloadFromDraft,
-} from "../components/DeviceEditor";
+import { DeviceDraft, DeviceEditorModal, RackHeightField, emptyDraft } from "../components/DeviceEditor";
 import PhotoGallery from "../components/PhotoGallery";
 import RelocateDialog, { RelocateKind } from "../components/RelocateDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import RestrictionPicker from "../components/RestrictionPicker";
 import { parseIdParam, projectHref } from "../nav";
-import AiImageParse, { EntryMode, EntryModeRadios } from "../components/AiImageParse";
 import { inheritedPhotoBlockers, photosAllowed, restrictionFields, restrictionTypeOf } from "../restriction";
 
 export default function RackPage() {
@@ -31,8 +23,6 @@ export default function RackPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [pdus, setPdus] = useState<PDU[]>([]);
   const [error, setError] = useState("");
-  const [draft, setDraft] = useState<DeviceDraft>(emptyDraft(rid));
-  const [photos, setPhotos] = useState<File[]>([]);
   const [pduName, setPduName] = useState("PDU-A");
   const [editing, setEditing] = useState<Device | null>(null);
   const [adding, setAdding] = useState<DeviceDraft | null>(null);
@@ -41,7 +31,6 @@ export default function RackPage() {
     null,
   );
   const [height, setHeight] = useState(42);
-  const [deviceMode, setDeviceMode] = useState<EntryMode>("manual");
 
   async function load() {
     try {
@@ -59,7 +48,6 @@ export default function RackPage() {
   }
   useEffect(() => {
     load();
-    setDraft(emptyDraft(rid));
   }, [pid, rid]);
 
   const byId = useMemo(() => {
@@ -67,17 +55,6 @@ export default function RackPage() {
     elev?.devices.forEach((d) => m.set(d.id, d));
     return m;
   }, [elev]);
-
-  async function addDevice(e: FormEvent) {
-    e.preventDefault();
-    const created = await projects.addDevice(pid, payloadFromDraft({ ...draft, rack_id: rid }));
-    if (photos.length) {
-      await uploadPhotos("device", created.id, photos, draft.restricted);
-    }
-    setDraft(emptyDraft(rid));
-    setPhotos([]);
-    load();
-  }
 
   async function saveRack(e: FormEvent) {
     e.preventDefault();
@@ -227,41 +204,6 @@ export default function RackPage() {
                 Delete
               </button>
             </div>
-          </form>
-          <form className="card" onSubmit={addDevice} style={{ marginTop: 12 }}>
-            <h3>Add device to this rack</h3>
-            <EntryModeRadios name="entry-rack-device" value={deviceMode} onChange={setDeviceMode} />
-            {deviceMode === "ai" ? (
-              <AiImageParse
-                projectId={pid}
-                target="device"
-                areaId={elev.rack.area_id || ""}
-                rowId={elev.rack.row_id || ""}
-                rackId={rid}
-                project={project}
-                areas={areas}
-                rows={aisleRows}
-                racks={racks}
-                onInventoryChanged={load}
-              />
-            ) : (
-              <>
-                <DeviceFields
-                  value={draft}
-                  onChange={setDraft}
-                  racks={racks}
-                  areas={areas}
-                  rows={aisleRows}
-                  devices={elev.devices}
-                  pdus={pdus}
-                  project={project}
-                  showLocation={false}
-                  pendingPhotos={photos}
-                  onPendingPhotos={setPhotos}
-                />
-                <button className="btn primary block">Save device</button>
-              </>
-            )}
           </form>
           <div className="card" style={{ marginTop: 12 }}>
             <PhotoGallery entityType="rack" entityId={rid} allowed={rackPhotosOk} restricted={!rackPhotosOk} />
