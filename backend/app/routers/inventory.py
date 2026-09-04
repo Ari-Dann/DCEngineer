@@ -35,6 +35,7 @@ from app.layout import apply_relocate, apply_row_to_rack, backfill_rows, bulk_cr
 from app.nesting import detach_children, elevation_occupants, nest_devices_in_racks
 from app.rbi_export import eol_status
 from app.restriction import apply_flags
+from app.search import matches_text, text_matches
 from app.schemas import (
     AreaIn,
     AreaOut,
@@ -500,21 +501,21 @@ def list_devices(
     if unlocated:
         query = query.filter(Device.rack_id.is_(None) | Device.ru_start.is_(None))
     if q:
-        like = f"%{q}%"
         query = query.filter(
-            or_(
-                Device.name.ilike(like),
-                Device.serial.ilike(like),
-                Device.vendor.ilike(like),
-                Device.model.ilike(like),
-                Device.hostname.ilike(like),
-                Device.asset_tag.ilike(like),
-                Device.owner.ilike(like),
-                Device.management_ip.ilike(like),
-                Device.function.ilike(like),
-                Device.notes.ilike(like),
-                Device.indicator_type.ilike(like),
-                Device.indicator_color.ilike(like),
+            matches_text(
+                q,
+                Device.name,
+                Device.serial,
+                Device.vendor,
+                Device.model,
+                Device.hostname,
+                Device.asset_tag,
+                Device.owner,
+                Device.management_ip,
+                Device.function,
+                Device.notes,
+                Device.indicator_type,
+                Device.indicator_color,
             )
         )
     devices = query.order_by(Device.name).all()
@@ -561,29 +562,32 @@ def search_inventory(
         }
         query = query.filter(Device.rack_id.in_(allowed) if allowed else Device.rack_id == -1)
     if q.strip():
-        like = f"%{q.strip()}%"
+        needle = q.strip()
         rack_ids = [
             rid
             for rid, rack in racks.items()
-            if like[1:-1].lower() in (rack.name or "").lower()
-            or like[1:-1].lower() in (rack.row_label or "").lower()
-            or (rows.get(rack.row_id) and like[1:-1].lower() in rows[rack.row_id].name.lower())
-            or (areas.get(rack.area_id) and like[1:-1].lower() in areas[rack.area_id].name.lower())
+            if text_matches(rack.name, needle)
+            or text_matches(rack.row_label, needle)
+            or (rows.get(rack.row_id) and text_matches(rows[rack.row_id].name, needle))
+            or (areas.get(rack.area_id) and text_matches(areas[rack.area_id].name, needle))
         ]
         query = query.filter(
             or_(
-                Device.name.ilike(like),
-                Device.serial.ilike(like),
-                Device.vendor.ilike(like),
-                Device.model.ilike(like),
-                Device.hostname.ilike(like),
-                Device.asset_tag.ilike(like),
-                Device.owner.ilike(like),
-                Device.management_ip.ilike(like),
-                Device.function.ilike(like),
-                Device.notes.ilike(like),
-                Device.indicator_type.ilike(like),
-                Device.indicator_color.ilike(like),
+                matches_text(
+                    needle,
+                    Device.name,
+                    Device.serial,
+                    Device.vendor,
+                    Device.model,
+                    Device.hostname,
+                    Device.asset_tag,
+                    Device.owner,
+                    Device.management_ip,
+                    Device.function,
+                    Device.notes,
+                    Device.indicator_type,
+                    Device.indicator_color,
+                ),
                 Device.rack_id.in_(rack_ids) if rack_ids else False,
             )
         )
@@ -617,18 +621,11 @@ def global_search(
     needle = (q or "").strip()
     if not needle:
         return _empty_global_search(needle)
-    like = f"%{needle}%"
     if project_id:
         _get_project(db, project_id)
 
     pq = db.query(Project).filter(
-        or_(
-            Project.name.ilike(like),
-            Project.customer.ilike(like),
-            Project.site_name.ilike(like),
-            Project.site_address.ilike(like),
-            Project.sponsor.ilike(like),
-        )
+        matches_text(needle, Project.name, Project.customer, Project.site_name, Project.site_address, Project.sponsor)
     )
     if project_id:
         pq = pq.filter(Project.id == project_id)
@@ -646,7 +643,7 @@ def global_search(
     aq = (
         db.query(Area, Project)
         .join(Project, Area.project_id == Project.id)
-        .filter(or_(Area.name.ilike(like), Area.description.ilike(like)))
+        .filter(matches_text(needle, Area.name, Area.description))
     )
     if project_id:
         aq = aq.filter(Area.project_id == project_id)
@@ -665,7 +662,7 @@ def global_search(
         db.query(AisleRow, Project, Area)
         .join(Project, AisleRow.project_id == Project.id)
         .outerjoin(Area, AisleRow.area_id == Area.id)
-        .filter(or_(AisleRow.name.ilike(like), AisleRow.notes.ilike(like)))
+        .filter(matches_text(needle, AisleRow.name, AisleRow.notes))
     )
     if project_id:
         rq = rq.filter(AisleRow.project_id == project_id)
@@ -686,14 +683,7 @@ def global_search(
         .join(Project, Rack.project_id == Project.id)
         .outerjoin(Area, Rack.area_id == Area.id)
         .outerjoin(AisleRow, Rack.row_id == AisleRow.id)
-        .filter(
-            or_(
-                Rack.name.ilike(like),
-                Rack.row_label.ilike(like),
-                Rack.position.ilike(like),
-                Rack.notes.ilike(like),
-            )
-        )
+        .filter(matches_text(needle, Rack.name, Rack.row_label, Rack.position, Rack.notes))
     )
     if project_id:
         kq = kq.filter(Rack.project_id == project_id)
@@ -713,18 +703,19 @@ def global_search(
     ]
 
     dq = db.query(Device).filter(
-        or_(
-            Device.name.ilike(like),
-            Device.serial.ilike(like),
-            Device.vendor.ilike(like),
-            Device.model.ilike(like),
-            Device.hostname.ilike(like),
-            Device.asset_tag.ilike(like),
-            Device.owner.ilike(like),
-            Device.management_ip.ilike(like),
-            Device.function.ilike(like),
-            Device.notes.ilike(like),
-            Device.device_type.ilike(like),
+        matches_text(
+            needle,
+            Device.name,
+            Device.serial,
+            Device.vendor,
+            Device.model,
+            Device.hostname,
+            Device.asset_tag,
+            Device.owner,
+            Device.management_ip,
+            Device.function,
+            Device.notes,
+            Device.device_type,
         )
     )
     if project_id:

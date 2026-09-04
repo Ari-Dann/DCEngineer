@@ -2214,6 +2214,37 @@ def test_global_search_finds_layout_and_devices(client, auth):
     assert all(p["id"] == pid for p in scoped.json()["projects"])
 
 
+def test_search_treats_spaces_hyphens_and_compact_tags_as_equal(client, auth):
+    project = client.post("/api/projects", headers=auth, json={"name": "Tag Fold"}).json()
+    pid = project["id"]
+    device = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={"name": "leaf-a", "serial": "ABC-123", "asset_tag": "AT_00912", "hostname": "core.sw01"},
+    ).json()
+
+    def ids(q: str) -> set[int]:
+        body = client.get("/api/search", headers=auth, params={"q": q})
+        assert body.status_code == 200, body.text
+        return {d["id"] for d in body.json()["devices"]}
+
+    assert device["id"] in ids("ABC-123")
+    assert device["id"] in ids("ABC 123")
+    assert device["id"] in ids("ABC123")
+    assert device["id"] in ids("ABC_123")
+    assert device["id"] in ids("ABC.123")
+    assert device["id"] in ids("AT 00912")
+    assert device["id"] in ids("coresw01")
+
+    located = client.get(f"/api/projects/{pid}/search", headers=auth, params={"q": "ABC 123"})
+    assert located.status_code == 200, located.text
+    assert any(d["id"] == device["id"] for d in located.json()["devices"])
+
+    listed = client.get(f"/api/projects/{pid}/devices", headers=auth, params={"q": "ABC123"})
+    assert listed.status_code == 200, listed.text
+    assert any(d["id"] == device["id"] for d in listed.json())
+
+
 def test_create_update_nests_and_copy_move_preserve_parent(client, auth):
     project = client.post("/api/projects", headers=auth, json={"name": "Nest editor"}).json()
     pid = project["id"]
