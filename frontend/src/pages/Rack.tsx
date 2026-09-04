@@ -10,6 +10,15 @@ import RestrictionPicker from "../components/RestrictionPicker";
 import { parseIdParam, projectHref } from "../nav";
 import { inheritedPhotoBlockers, photosAllowed, restrictionFields, restrictionTypeOf } from "../restriction";
 
+function deviceTypeClass(type?: string) {
+  const slug = (type || "other")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "other";
+  return `dev-${slug}`;
+}
+
 export default function RackPage() {
   const { id, rackId } = useParams();
   const navigate = useNavigate();
@@ -128,7 +137,7 @@ export default function RackPage() {
                   <div className="u">{s.u}</div>
                   <button
                     type="button"
-                    className={`slot ${dev ? `dev-${dev.device_type}` : "empty"}${!dev && adding?.ru_start === s.u ? " picked" : ""}`}
+                    className={`slot ${dev ? deviceTypeClass(dev.device_type) : "empty"}${!dev && adding?.ru_start === s.u ? " picked" : ""}`}
                     onClick={() => {
                       if (dev) {
                         setAdding(null);

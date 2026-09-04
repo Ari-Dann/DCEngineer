@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.nesting import find_parent, looks_like_container, nest_devices, occupies_elevation
+from app.nesting import elevation_occupants, find_parent, looks_like_container, nest_devices, occupies_elevation
 
 
 def _dev(**kwargs):
@@ -25,6 +25,9 @@ def test_looks_like_container_chassis_shelf_and_ucs_pids():
     assert looks_like_container(_dev(model="N20-C6508"))
     assert looks_like_container(_dev(name="Disk shelf 1", device_type="storage"))
     assert looks_like_container(_dev(function="blade chassis"))
+    assert looks_like_container(_dev(device_type="nas"))
+    assert looks_like_container(_dev(device_type="chassis"))
+    assert looks_like_container(_dev(name="Synology NAS"))
     assert looks_like_container(_dev(name="enclosure A"))
     assert not looks_like_container(_dev(name="blade-a", serial="SN-1"))
     assert not looks_like_container(_dev(name="core-sw", model="C9300-48P"))
@@ -88,3 +91,30 @@ def test_find_parent_prefers_smallest_enclosing():
     blade = _dev(id=3, name="blade-a", ru_start=34, ru_end=34)
     assert find_parent(blade, [chassis, shelf, blade]) is shelf
     assert find_parent(shelf, [chassis, shelf, blade]) is chassis
+
+
+def test_same_range_components_nest_under_nas_type():
+    nas = _dev(id=1, name="NetApp FAS", device_type="nas", ru_start=10, ru_end=12)
+    disk_a = _dev(id=2, name="disk-1", ru_start=10, ru_end=12)
+    disk_b = _dev(id=3, name="disk-2", ru_start=10, ru_end=12)
+    nest_devices([disk_a, disk_b, nas])
+    assert disk_a.parent_device_id == nas.id
+    assert disk_b.parent_device_id == nas.id
+    assert nas.parent_device_id is None
+    assert occupies_elevation(nas)
+    assert not occupies_elevation(disk_a)
+
+
+def test_elevation_occupants_prefers_largest_on_overlap():
+    large = _dev(id=2, name="chassis", device_type="chassis", ru_start=10, ru_end=20)
+    small = _dev(id=1, name="switch", device_type="switch", ru_start=18, ru_end=24)
+    occupied = elevation_occupants([small, large])
+    assert occupied[10].id == large.id
+    assert occupied[18].id == large.id
+    assert occupied[20].id == large.id
+    assert occupied[21].id == small.id
+    assert occupied[24].id == small.id
+    nested = nest_devices([small, large])
+    assert nested == 0
+    assert occupies_elevation(large)
+    assert occupies_elevation(small)

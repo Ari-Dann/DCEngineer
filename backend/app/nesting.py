@@ -9,7 +9,18 @@ from sqlalchemy.orm import Session
 
 from app.models import Device
 
-_CONTAINER_RE = re.compile(r"\b(?:blade\s+chassis|chassis|shelf|enclosure)\b", re.IGNORECASE)
+CONTAINER_TYPES = {
+    "chassis",
+    "blade chassis",
+    "shelf",
+    "nas",
+    "enclosure",
+}
+
+_CONTAINER_RE = re.compile(
+    r"\b(?:blade\s+chassis|chassis|shelf|enclosure|nas|san|disk\s+array|tape\s+library)\b",
+    re.IGNORECASE,
+)
 _UCS_5108_RE = re.compile(r"ucs[-\s]?sp[-\s]?5108|ucs[-\s]?5108|n20-c6508", re.IGNORECASE)
 
 
@@ -27,6 +38,9 @@ def occupies_elevation(device: Device) -> bool:
 
 
 def looks_like_container(device: Device) -> bool:
+    dtype = str(getattr(device, "device_type", "") or "").strip().lower()
+    if dtype in CONTAINER_TYPES:
+        return True
     blob = " ".join(
         str(getattr(device, key, "") or "")
         for key in ("name", "model", "device_type", "function")
@@ -70,6 +84,33 @@ def find_parent(device: Device, others: Iterable[Device]) -> Device | None:
         return None
     candidates.sort(key=lambda item: (item[0], item[1]))
     return candidates[0][2]
+
+
+def _span_of(device: Device) -> int:
+    rng = ru_range(device)
+    if not rng:
+        return 0
+    return _span(rng)
+
+
+def elevation_occupants(devices: Iterable[Device]) -> dict[int, Device]:
+    """Map each RU to the device that should paint it: largest span, then containers."""
+    by_u: dict[int, list[Device]] = {}
+    for device in devices:
+        if not occupies_elevation(device):
+            continue
+        rng = ru_range(device)
+        if not rng:
+            continue
+        for u in range(rng[0], rng[1] + 1):
+            by_u.setdefault(u, []).append(device)
+    occupied: dict[int, Device] = {}
+    for u, group in by_u.items():
+        occupied[u] = max(
+            group,
+            key=lambda device: (_span_of(device), int(looks_like_container(device)), -(getattr(device, "id", 0) or 0)),
+        )
+    return occupied
 
 
 def nest_devices(devices: list[Device]) -> int:

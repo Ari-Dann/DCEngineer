@@ -32,7 +32,7 @@ from app.models import (
 from app.catalog import learn_values
 from app.importer import import_devices, preview_import
 from app.layout import apply_relocate, apply_row_to_rack, backfill_rows, bulk_create_rows, resolve_or_create_row, unique_labels
-from app.nesting import detach_children, nest_devices_in_racks, occupies_elevation
+from app.nesting import detach_children, elevation_occupants, nest_devices_in_racks
 from app.rbi_export import eol_status
 from app.restriction import apply_flags
 from app.schemas import (
@@ -464,14 +464,8 @@ def rack_elevation(project_id: int, rack_id: int, db: Session = Depends(get_db),
     if not rack or rack.project_id != project_id:
         raise HTTPException(404, "Rack not found")
     devices = db.query(Device).filter(Device.rack_id == rack_id).all()
+    occupied = {u: dev.id for u, dev in elevation_occupants(devices).items()}
     slots = []
-    occupied = {}
-    for dev in devices:
-        if not occupies_elevation(dev):
-            continue
-        start, end = int(dev.ru_start), int(dev.ru_end or dev.ru_start)
-        for u in range(min(start, end), max(start, end) + 1):
-            occupied[u] = dev.id
     for u in range(rack.ru_height, 0, -1):
         slots.append({"u": u, "device_id": occupied.get(u)})
     return {

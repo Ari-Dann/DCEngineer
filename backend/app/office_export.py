@@ -16,7 +16,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 from sqlalchemy.orm import Session
 
 from app.models import AisleRow, Area, Attachment, Device, Project, Rack
-from app.nesting import nested_count_for, occupies_elevation
+from app.nesting import elevation_occupants, nested_count_for
 from app.rbi_export import HEADER_FILL, HEADER_FONT, _autosize, _header, rack_svg
 from app.storage import get_storage
 
@@ -48,6 +48,11 @@ DEVICE_FILL = {
     "firewall": "#E87A4C",
     "router": "#5EC8E8",
     "storage": "#9B7DFF",
+    "nas": "#9B7DFF",
+    "chassis": "#5B6FD6",
+    "blade chassis": "#5B6FD6",
+    "shelf": "#7A6AD6",
+    "enclosure": "#6A7AD6",
     "pdu": "#E8A317",
     "ups": "#E85D4C",
 }
@@ -1005,13 +1010,7 @@ def build_vsdx(layout: Layout) -> bytes:
         slot_h = min(0.32, 14.8 / max(ru, 1))
         elev_w = 4.6
         top_y = 15.6
-        occupied: dict[int, Device] = {}
-        for device in layout.devices_by_rack.get(rack.id, []):
-            if not occupies_elevation(device):
-                continue
-            start, end = int(device.ru_start), int(device.ru_end or device.ru_start)
-            for u in range(min(start, end), max(start, end) + 1):
-                occupied[u] = device
+        occupied = elevation_occupants(layout.devices_by_rack.get(rack.id, []))
         drawn: set[int] = set()
         for u in range(ru, 0, -1):
             y = top_y - (ru - u + 0.5) * slot_h
