@@ -15,6 +15,22 @@ const BARCODE_FORMATS = [
 const LABEL =
   /^(?:s\/n|sn|serial(?:\s*number)?|p\/n|pn|part(?:\s*no(?:\.|umber)?)?|asset(?:\s*tag)?|tag|hostname|host|svc(?:\s*tag)?|service\s*tag)\s*[:#-]?\s*(.+)$/i;
 
+export type OcrDeviceFields = {
+  serial?: string;
+  asset_tag?: string;
+  hostname?: string;
+  model?: string;
+  name?: string;
+};
+
+const FIELD_PATTERNS: { key: keyof OcrDeviceFields; re: RegExp }[] = [
+  { key: "serial", re: /^(?:s\/n|sn|serial(?:\s*(?:no\.?|number|#))?)\s*[:#-]?\s*(.+)$/i },
+  { key: "asset_tag", re: /^(?:asset(?:\s*tag)?|svc(?:\s*tag)?|service\s*tag|tag)\s*[:#-]?\s*(.+)$/i },
+  { key: "hostname", re: /^(?:host(?:name)?|dns)\s*[:#-]?\s*(.+)$/i },
+  { key: "model", re: /^(?:model|p\/n|pn|part(?:\s*(?:no\.?|number))?)\s*[:#-]?\s*(.+)$/i },
+  { key: "name", re: /^(?:name|device\s*name)\s*[:#-]?\s*(.+)$/i },
+];
+
 type Detector = { detect: (source: ImageBitmapSource) => Promise<{ rawValue: string }[]> };
 type DetectorCtor = new (opts?: { formats?: string[] }) => Detector;
 
@@ -57,11 +73,8 @@ export function queryFromOcr(text: string): string {
   for (const line of lines) {
     const match = line.match(LABEL);
     if (match?.[1]) {
-      const parts = match[1].split(/[\s,;|]+/).map(normalizeToken).filter(Boolean);
-      const ranked = [...parts].sort((a, b) => scoreToken(b) - scoreToken(a));
-      if (ranked[0] && scoreToken(ranked[0]) > 0) return ranked[0];
-      const rest = match[1].trim();
-      if (rest.length >= 3 && rest.length <= 48) return rest.slice(0, 48);
+      const picked = pickLabeledValue(match[1]);
+      if (picked) return picked;
     }
   }
   const tokens = cleaned.split(/[\s,;|]+/).map(normalizeToken).filter(Boolean);
@@ -69,6 +82,38 @@ export function queryFromOcr(text: string): string {
   if (ranked[0] && scoreToken(ranked[0]) >= 2) return ranked[0];
   const short = lines.find((line) => line.length >= 3 && line.length <= 40);
   return (short || cleaned.replace(/\s+/g, " ")).slice(0, 64);
+}
+
+function pickLabeledValue(raw: string): string {
+  const parts = raw.split(/[\s,;|]+/).map(normalizeToken).filter(Boolean);
+  const ranked = [...parts].sort((a, b) => scoreToken(b) - scoreToken(a));
+  if (ranked[0] && scoreToken(ranked[0]) > 0) return ranked[0];
+  const rest = raw.trim();
+  return rest.length >= 2 && rest.length <= 64 ? rest.slice(0, 64) : "";
+}
+
+/** Parse labeled device fields from OCR text (serial, asset tag, hostname, …). */
+export function fieldsFromOcr(text: string): OcrDeviceFields {
+  const cleaned = (text || "").replace(/\u0000/g, " ").trim();
+  const out: OcrDeviceFields = {};
+  if (!cleaned) return out;
+  const lines = cleaned.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    for (const { key, re } of FIELD_PATTERNS) {
+      if (out[key]) continue;
+      const match = line.match(re);
+      if (!match?.[1]) continue;
+      const picked = pickLabeledValue(match[1]);
+      if (picked) out[key] = picked;
+    }
+  }
+  if (!out.serial) {
+    const fallback = queryFromOcr(cleaned);
+    if (fallback && fallback !== out.asset_tag && fallback !== out.hostname && fallback !== out.model) {
+      out.serial = fallback;
+    }
+  }
+  return out;
 }
 
 async function snapshot(source: ImageBitmapSource): Promise<Blob> {
@@ -148,4 +193,34 @@ export async function recognizeLabel(input: ImageBitmapSource | Blob): Promise<s
   const blob = input instanceof Blob ? input : await snapshot(source);
   const tess = await ocrWithTesseract(blob);
   return queryFromOcr(tess);
+}
+
+/** Full barcode + OCR text from an image, for filling several device fields. */
+export async function readImageText(input: ImageBitmapSource | Blob): Promise<string> {
+  const source = input instanceof Blob ? await createImageBitmap(input) : input;
+  const chunks: string[] = [];
+  try {
+    const barcode = getDetector("BarcodeDetector");
+    if (barcode) {
+      const codes = await barcode.detect(source);
+      const value = codes[0]?.rawValue?.trim();
+      if (value) chunks.push(value);
+    }
+  } catch {
+    /* continue */
+  }
+  try {
+    const text = getDetector("TextDetector");
+    if (text) {
+      const hits = await text.detect(source);
+      const joined = hits.map((hit) => hit.rawValue).filter(Boolean).join("\n");
+      if (joined) chunks.push(joined);
+    }
+  } catch {
+    /* continue */
+  }
+  const blob = input instanceof Blob ? input : await snapshot(source);
+  const tess = await ocrWithTesseract(blob);
+  if (tess.trim()) chunks.push(tess);
+  return chunks.join("\n");
 }
