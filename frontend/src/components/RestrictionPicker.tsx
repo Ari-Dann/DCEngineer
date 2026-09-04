@@ -11,6 +11,7 @@ type Props = {
   scope?: Scope;
   entityName?: string;
   compact?: boolean;
+  inline?: boolean;
   disabled?: boolean;
 };
 
@@ -33,6 +34,7 @@ export default function RestrictionPicker({
   scope,
   entityName,
   compact = false,
+  inline = false,
   disabled = false,
 }: Props) {
   const on = Boolean(value);
@@ -40,9 +42,10 @@ export default function RestrictionPicker({
   const switchText = where
     ? `Restricted — ${where} only`
     : "Restricted (government / EMSS) — no photos";
+  const visibleLabel = inline ? "Restricted" : switchText;
   return (
     <div
-      className={`restriction-picker${compact ? " compact" : ""}`}
+      className={`restriction-picker${compact ? " compact" : ""}${inline ? " inline" : ""}`}
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
     >
@@ -55,7 +58,7 @@ export default function RestrictionPicker({
           aria-label={switchText}
           onChange={(e) => onChange(e.target.checked ? "government" : "")}
         />
-        <span>{switchText}</span>
+        <span>{visibleLabel}</span>
       </label>
       {on && (
         <div className="choice compact restriction-choices" role="radiogroup" aria-label="Restriction type">
@@ -73,7 +76,7 @@ export default function RestrictionPicker({
           ))}
         </div>
       )}
-      {(on || inherited.length > 0) && !compact && (
+      {(on || inherited.length > 0) && !compact && !inline && (
         <p className="banner">
           {on
             ? scope === "row" || scope === "rack"
@@ -95,10 +98,11 @@ type SavedProps = {
   inherited?: RestrictionHit[];
   scope: "area" | "row" | "rack";
   compact?: boolean;
+  inline?: boolean;
   onPersist: (type: RestrictionType) => Promise<void>;
 };
 
-export function SavedRestrictionPicker({ name, entity, inherited, scope, compact, onPersist }: SavedProps) {
+export function SavedRestrictionPicker({ name, entity, inherited, scope, compact, inline, onPersist }: SavedProps) {
   const [value, setValue] = useState<RestrictionType>(() => restrictionTypeOf(entity));
   const [busy, setBusy] = useState(false);
 
@@ -128,6 +132,7 @@ export function SavedRestrictionPicker({ name, entity, inherited, scope, compact
       scope={scope}
       entityName={entity.name}
       compact={compact}
+      inline={inline}
       disabled={busy}
     />
   );

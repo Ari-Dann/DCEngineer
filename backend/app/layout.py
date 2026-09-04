@@ -312,6 +312,39 @@ def _target_rack(db: Session, project_id: int, rack_id: Optional[int]) -> Rack |
     return rack
 
 
+def _device_ru_span(device: Device) -> int:
+    if device.ru_start is None:
+        return 1
+    end = device.ru_end if device.ru_end is not None else device.ru_start
+    return max(1, abs(int(end) - int(device.ru_start)) + 1)
+
+
+def _shift_device_ru(device: Device, delta: int) -> None:
+    if not delta or device.ru_start is None:
+        return
+    device.ru_start = int(device.ru_start) + delta
+    if device.ru_end is not None:
+        device.ru_end = int(device.ru_end) + delta
+
+
+def _place_device_at_ru(device: Device, ru_start: int | None, rack: Rack | None) -> int | None:
+    """Set ru_start/ru_end, preserving height. Returns the delta applied to ru_start."""
+    if ru_start is None:
+        return None
+    if rack is None:
+        raise HTTPException(400, "Choose a target rack to place at a U elevation.")
+    span = _device_ru_span(device)
+    ru_end = ru_start + span - 1
+    if ru_end > rack.ru_height:
+        raise HTTPException(400, f"U{ru_start}–{ru_end} does not fit in {rack.name} ({rack.ru_height}U).")
+    old = device.ru_start
+    device.ru_start = ru_start
+    device.ru_end = ru_end
+    if old is None:
+        return 0
+    return ru_start - int(old)
+
+
 def apply_relocate(db: Session, kind: str, entity, body: RelocateIn, copy: bool):
     target_project_id = body.target_project_id
     include_children = body.include_children
@@ -430,8 +463,11 @@ def apply_relocate(db: Session, kind: str, entity, body: RelocateIn, copy: bool)
                 pdu_b_id=None,
                 parent_device_id=None,
             )
+            _place_device_at_ru(clone, body.target_ru_start, dest_rack)
             db.add(clone)
             db.flush()
+            if dest_rack_id:
+                nest_devices_in_racks(db, [dest_rack_id])
             return clone
         old_rack_id = entity.rack_id
         entity.project_id = target_project_id
@@ -439,12 +475,15 @@ def apply_relocate(db: Session, kind: str, entity, body: RelocateIn, copy: bool)
         if old_rack_id != dest_rack_id:
             entity.pdu_a_id = None
             entity.pdu_b_id = None
+        delta = _place_device_at_ru(entity, body.target_ru_start, dest_rack)
         for child in descendants(db, entity.id):
             child.project_id = target_project_id
             if old_rack_id != dest_rack_id:
                 child.rack_id = dest_rack_id
                 child.pdu_a_id = None
                 child.pdu_b_id = None
+            if delta:
+                _shift_device_ru(child, delta)
         nest_devices_in_racks(db, [rid for rid in (old_rack_id, dest_rack_id) if rid])
         return entity
 

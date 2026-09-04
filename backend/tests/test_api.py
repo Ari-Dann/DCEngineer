@@ -671,6 +671,86 @@ def test_rows_relocate_indicators_and_device_copy_move(client, auth):
     assert any(r["id"] == rack_id for r in dest_racks)
 
 
+def test_device_copy_move_places_at_ru_elevation(client, auth):
+    src = client.post("/api/projects", headers=auth, json={"name": "RU src"}).json()
+    dest = client.post("/api/projects", headers=auth, json={"name": "RU dest"}).json()
+    src_id, dest_id = src["id"], dest["id"]
+    rack = client.post(
+        f"/api/projects/{src_id}/racks",
+        headers=auth,
+        json={"name": "A01", "ru_height": 42},
+    ).json()
+    dest_rack = client.post(
+        f"/api/projects/{dest_id}/racks",
+        headers=auth,
+        json={"name": "B01", "ru_height": 42},
+    ).json()
+    chassis = client.post(
+        f"/api/projects/{src_id}/devices",
+        headers=auth,
+        json={
+            "name": "UCS chassis",
+            "model": "UCS-SP-5108-AC",
+            "rack_id": rack["id"],
+            "ru_start": 32,
+            "ru_end": 38,
+            "serial": "CH-RU",
+        },
+    ).json()
+    blade = client.post(
+        f"/api/projects/{src_id}/devices",
+        headers=auth,
+        json={
+            "name": "blade-1",
+            "rack_id": rack["id"],
+            "ru_start": 34,
+            "ru_end": 34,
+            "serial": "BL-RU",
+        },
+    ).json()
+    assert blade["parent_device_id"] == chassis["id"]
+
+    missing_rack = client.post(
+        f"/api/projects/{src_id}/devices/{chassis['id']}/copy",
+        headers=auth,
+        json={"target_project_id": dest_id, "target_ru_start": 10},
+    )
+    assert missing_rack.status_code == 400, missing_rack.text
+
+    copied = client.post(
+        f"/api/projects/{src_id}/devices/{chassis['id']}/copy",
+        headers=auth,
+        json={"target_project_id": dest_id, "target_rack_id": dest_rack["id"], "target_ru_start": 20},
+    )
+    assert copied.status_code == 200, copied.text
+    assert copied.json()["rack_id"] == dest_rack["id"]
+    assert copied.json()["ru_start"] == 20
+    assert copied.json()["ru_end"] == 26
+    original = client.get(f"/api/projects/{src_id}/devices/{chassis['id']}", headers=auth).json()
+    assert original["ru_start"] == 32
+    assert original["ru_end"] == 38
+
+    overflow = client.post(
+        f"/api/projects/{src_id}/devices/{chassis['id']}/copy",
+        headers=auth,
+        json={"target_project_id": dest_id, "target_rack_id": dest_rack["id"], "target_ru_start": 40},
+    )
+    assert overflow.status_code == 400, overflow.text
+
+    moved = client.post(
+        f"/api/projects/{src_id}/devices/{chassis['id']}/move",
+        headers=auth,
+        json={"target_project_id": dest_id, "target_rack_id": dest_rack["id"], "target_ru_start": 10},
+    )
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["ru_start"] == 10
+    assert moved.json()["ru_end"] == 16
+    moved_blade = client.get(f"/api/projects/{dest_id}/devices/{blade['id']}", headers=auth).json()
+    assert moved_blade["rack_id"] == dest_rack["id"]
+    assert moved_blade["ru_start"] == 12
+    assert moved_blade["ru_end"] == 12
+    assert moved_blade["parent_device_id"] == chassis["id"]
+
 
 def test_area_row_rack_hierarchy_copy_move_search(client, auth):
     src = client.post("/api/projects", headers=auth, json={"name": "Layout src", "customer": "Acme"})

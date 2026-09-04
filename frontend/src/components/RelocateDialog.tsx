@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { AisleRow, Area, Project, Rack, RelocateBody, projects } from "../api";
+import { AisleRow, Area, Device, Project, Rack, RelocateBody, projects } from "../api";
 
 export type RelocateKind = "area" | "row" | "rack" | "device";
 type Mode = "copy" | "move";
@@ -26,10 +26,12 @@ export default function RelocateDialog({
   const [areas, setAreas] = useState<Area[]>([]);
   const [rows, setRows] = useState<AisleRow[]>([]);
   const [racks, setRacks] = useState<Rack[]>([]);
+  const [sourceDevices, setSourceDevices] = useState<Device[]>([]);
   const [targetProject, setTargetProject] = useState<number | "">(projectId);
   const [targetArea, setTargetArea] = useState<number | "">("");
   const [targetRow, setTargetRow] = useState<number | "">("");
   const [targetRack, setTargetRack] = useState<number | "">("");
+  const [targetRu, setTargetRu] = useState<number | "">("");
   const [includeChildren, setIncludeChildren] = useState(true);
   const [includeDevices, setIncludeDevices] = useState(false);
   const [error, setError] = useState("");
@@ -41,6 +43,16 @@ export default function RelocateDialog({
       if (!targetProject && list[0]) setTargetProject(list[0].id);
     });
   }, []);
+
+  useEffect(() => {
+    if (kind !== "device" || !ids.length) {
+      setSourceDevices([]);
+      return;
+    }
+    Promise.all(ids.map((id) => projects.getDevice(projectId, id)))
+      .then(setSourceDevices)
+      .catch(() => setSourceDevices([]));
+  }, [kind, projectId, ids.join(",")]);
 
   useEffect(() => {
     if (!targetProject) {
@@ -56,6 +68,7 @@ export default function RelocateDialog({
     setTargetArea("");
     setTargetRow("");
     setTargetRack("");
+    setTargetRu("");
   }, [targetProject]);
 
   const filteredRows = targetArea ? rows.filter((r) => r.area_id === targetArea) : rows;
@@ -66,11 +79,24 @@ export default function RelocateDialog({
     }
     return true;
   });
+  const selectedRack = targetRack ? filteredRacks.find((r) => r.id === targetRack) : undefined;
+  const currentRu =
+    sourceDevices.length === 1 && sourceDevices[0].ru_start
+      ? `U${sourceDevices[0].ru_start}${
+          sourceDevices[0].ru_end && sourceDevices[0].ru_end !== sourceDevices[0].ru_start
+            ? `–${sourceDevices[0].ru_end}`
+            : ""
+        }`
+      : "";
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!targetProject) {
       setError("Pick a destination project.");
+      return;
+    }
+    if (kind === "device" && targetRu !== "" && !targetRack) {
+      setError("Choose a target rack to place at a U elevation.");
       return;
     }
     setBusy(true);
@@ -84,7 +110,10 @@ export default function RelocateDialog({
       body.target_area_id = targetArea ? Number(targetArea) : null;
     }
     if (kind === "rack" || kind === "device") body.target_row_id = targetRow ? Number(targetRow) : null;
-    if (kind === "device") body.target_rack_id = targetRack ? Number(targetRack) : null;
+    if (kind === "device") {
+      body.target_rack_id = targetRack ? Number(targetRack) : null;
+      if (targetRu !== "") body.target_ru_start = Number(targetRu);
+    }
     try {
       for (const id of ids) {
         if (kind === "area") {
@@ -119,7 +148,7 @@ export default function RelocateDialog({
         </div>
         <p className="muted">
           {kind === "device"
-            ? "Hierarchy is Project → Area → Row → Rack. Leave rack empty to keep the device unlocated in the destination project."
+            ? "Hierarchy is Project → Area → Row → Rack. Leave rack empty to keep the device unlocated, or pick a rack and optionally a U elevation."
             : `Hierarchy is Area → Row → Rack. ${mode === "copy" ? "Copy duplicates structure." : "Move reassigns the record and its children."}`}
         </p>
         {error && <div className="error">{error}</div>}
@@ -144,6 +173,7 @@ export default function RelocateDialog({
                 setTargetArea(e.target.value ? Number(e.target.value) : "");
                 setTargetRow("");
                 setTargetRack("");
+                setTargetRu("");
               }}
             >
               <option value="">—</option>
@@ -163,6 +193,7 @@ export default function RelocateDialog({
               onChange={(e) => {
                 setTargetRow(e.target.value ? Number(e.target.value) : "");
                 setTargetRack("");
+                setTargetRu("");
               }}
             >
               <option value="">—</option>
@@ -176,18 +207,45 @@ export default function RelocateDialog({
           </label>
         )}
         {kind === "device" && (
-          <label className="field">
-            <span>Target rack</span>
-            <select value={targetRack} onChange={(e) => setTargetRack(e.target.value ? Number(e.target.value) : "")}>
-              <option value="">Unlocated</option>
-              {filteredRacks.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                  {r.row_label ? ` · ${r.row_label}` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
+          <>
+            <label className="field">
+              <span>Target rack</span>
+              <select
+                value={targetRack}
+                onChange={(e) => {
+                  setTargetRack(e.target.value ? Number(e.target.value) : "");
+                  if (!e.target.value) setTargetRu("");
+                }}
+              >
+                <option value="">Unlocated</option>
+                {filteredRacks.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                    {r.row_label ? ` · ${r.row_label}` : ""}
+                    {` · ${r.ru_height}U`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {targetRack !== "" && (
+              <label className="field">
+                <span>Place at RU (from bottom)</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={selectedRack?.ru_height || 70}
+                  value={targetRu}
+                  onChange={(e) => setTargetRu(e.target.value ? Number(e.target.value) : "")}
+                  placeholder={currentRu ? `Keep current (${currentRu})` : "Keep current U"}
+                />
+                <span>
+                  Optional. Sets the bottom RU and keeps the device height
+                  {selectedRack ? ` in this ${selectedRack.ru_height}U rack` : ""}.
+                  {ids.length > 1 ? " All selected devices use this U." : ""}
+                </span>
+              </label>
+            )}
+          </>
         )}
         {kind !== "rack" && kind !== "device" && (
           <label className="check-row">
