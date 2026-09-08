@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Attachment, deleteAttachment, fetchAttachmentBlob, listAttachments, uploadFile } from "../api";
+import { nextLoad } from "../loadGuard";
 import CameraModal from "./CameraModal";
 
 type Props = {
@@ -20,13 +21,17 @@ export default function PhotoGallery({
   const [items, setItems] = useState<Attachment[]>([]);
   const [urls, setUrls] = useState<Record<number, string>>({});
   const urlsRef = useRef<Record<number, string>>({});
+  const loadSeq = useRef({ id: 0 });
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
   const [view, setView] = useState<number | null>(null);
   const [readingId, setReadingId] = useState<number | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   async function load() {
+    const gen = nextLoad(loadSeq.current);
     const rows = await listAttachments(entityType, entityId);
+    if (!gen.isCurrent()) return;
     setItems(rows);
     const next: Record<number, string> = {};
     for (const row of rows) {
@@ -37,6 +42,14 @@ export default function PhotoGallery({
           /* skip */
         }
       }
+      if (!gen.isCurrent()) {
+        Object.values(next).forEach((u) => URL.revokeObjectURL(u));
+        return;
+      }
+    }
+    if (!gen.isCurrent()) {
+      Object.values(next).forEach((u) => URL.revokeObjectURL(u));
+      return;
     }
     Object.values(urlsRef.current).forEach((u) => URL.revokeObjectURL(u));
     urlsRef.current = next;
@@ -46,6 +59,7 @@ export default function PhotoGallery({
   useEffect(() => {
     load().catch((e) => setError(e instanceof Error ? e.message : "Could not load photos"));
     return () => {
+      nextLoad(loadSeq.current);
       Object.values(urlsRef.current).forEach((u) => URL.revokeObjectURL(u));
       urlsRef.current = {};
     };
@@ -80,8 +94,8 @@ export default function PhotoGallery({
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
         <h3>Photos ({items.length})</h3>
-        <button type="button" className="btn primary" disabled={restricted} onClick={() => setOpen(true)}>
-          Capture photo
+        <button type="button" className="btn primary" disabled={restricted || uploading} onClick={() => setOpen(true)}>
+          {uploading ? "Saving photo…" : "Capture photo"}
         </button>
       </div>
       {restricted && <p className="muted">Restricted equipment — photos are blocked.</p>}
@@ -127,8 +141,17 @@ export default function PhotoGallery({
           mode="photo"
           onClose={() => setOpen(false)}
           onPhoto={async (file) => {
-            await uploadFile(entityType, entityId, file, restricted);
-            await load();
+            setUploading(true);
+            setError("");
+            try {
+              await uploadFile(entityType, entityId, file, restricted);
+              await load();
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Could not save photo");
+              throw err;
+            } finally {
+              setUploading(false);
+            }
           }}
         />
       )}

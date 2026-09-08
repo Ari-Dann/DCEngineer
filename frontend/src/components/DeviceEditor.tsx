@@ -1,6 +1,6 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Catalog, DEFAULT_DEVICE_TYPES, OTHER, learnCatalog, loadCatalog } from "../catalog";
-import { AisleRow, Area, Device, PDU, Project, Rack, pduLabel, projects, uploadPhotos } from "../api";
+import { AisleRow, Area, Device, PDU, Project, Rack, enqueue, pduLabel, projects, uploadFile } from "../api";
 import {
   displayFromWatts,
   formatHierarchyPower,
@@ -16,6 +16,7 @@ import PhotoGallery from "./PhotoGallery";
 import RestrictionPicker from "./RestrictionPicker";
 import { fieldsFromOcr, readImageText, type OcrDeviceFields } from "../ocr";
 import { deviceRestrictionFields, inheritedPhotoBlockers, photosAllowed, restrictionTypeOf } from "../restriction";
+import { suggestedDeviceName } from "../loadGuard";
 
 export type DeviceDraft = {
   name: string;
@@ -146,7 +147,7 @@ export function payloadFromDraft(draft: DeviceDraft) {
     eol_notes: draft.eol_notes,
     undocumented: draft.undocumented,
     power_draw_watts: draft.power_draw_watts === "" ? null : Number(draft.power_draw_watts),
-    power_draw_unit: draft.power_draw_unit === "kW" ? "kW" : "W",
+    power_draw_unit: draft.power_draw_unit === "kW" ? ("kW" as const) : ("W" as const),
     dc_power_draw_amps: draft.dc_power_draw_amps === "" ? null : Number(draft.dc_power_draw_amps),
     pdu_a_id: draft.pdu_a_id === "" ? null : Number(draft.pdu_a_id),
     pdu_b_id: draft.pdu_b_id === "" ? null : Number(draft.pdu_b_id),
@@ -313,7 +314,7 @@ type Props = {
   showLocation?: boolean;
   showKnownLocation?: boolean;
   pendingPhotos?: File[];
-  onPendingPhotos?: (files: File[]) => void;
+  onPendingPhotos?: (files: File[]) => void | Promise<void>;
   savedDeviceId?: number;
   projectId?: number;
   project?: Project | null;
@@ -921,7 +922,9 @@ export function DeviceFields({
           mode={cam}
           onClose={() => setCam(null)}
           onScan={(serial) => set({ serial })}
-          onPhoto={(file) => onPendingPhotos?.([...(pendingPhotos || []), file])}
+          onPhoto={async (file) => {
+            await onPendingPhotos?.([...(pendingPhotos || []), file]);
+          }}
         />
       )}
     </>
@@ -961,32 +964,162 @@ export function DeviceEditorModal({
   onDelete?: () => void;
   onSelectDevice?: (d: Device) => void;
 }) {
-  const creating = !device;
+  const [savedDevice, setSavedDevice] = useState(device ?? null);
+  const creating = !savedDevice;
   const [draft, setDraft] = useState(device ? draftFromDevice(device) : initialDraft || emptyDraft());
+  const baseline = useRef(device ? draftFromDevice(device) : initialDraft || emptyDraft());
   const [photos, setPhotos] = useState<File[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const parent = device?.parent_device_id ? devices.find((d) => d.id === device.parent_device_id) : undefined;
-  const nested = device ? devices.filter((d) => d.parent_device_id === device.id) : [];
+  const savedRef = useRef(savedDevice);
+  const draftRef = useRef(draft);
+  const photosRef = useRef(photos);
+  const persistLock = useRef<Promise<Device> | null>(null);
+  savedRef.current = savedDevice;
+  draftRef.current = draft;
+  photosRef.current = photos;
+  const parent = savedDevice?.parent_device_id
+    ? devices.find((d) => d.id === savedDevice.parent_device_id)
+    : undefined;
+  const nested = savedDevice ? devices.filter((d) => d.parent_device_id === savedDevice.id) : [];
+
+  function isDirty() {
+    if (photosRef.current.length) return true;
+    return JSON.stringify(payloadFromDraft(draftRef.current)) !== JSON.stringify(payloadFromDraft(baseline.current));
+  }
+
+  async function persist(opts?: { autoName?: boolean }) {
+    const current = draftRef.current;
+    const body = payloadFromDraft({
+      ...current,
+      name: opts?.autoName ? suggestedDeviceName(current.name, current.ru_start) : current.name,
+    });
+    if (!body.name) {
+      throw new Error("Device name is required.");
+    }
+    if (body.name !== current.name) {
+      const named = { ...current, name: body.name };
+      draftRef.current = named;
+      setDraft(named);
+    }
+    const existing = savedRef.current;
+    const saved = existing
+      ? await projects.updateDevice(projectId, existing.id, body)
+      : await projects.addDevice(projectId, body);
+    savedRef.current = saved;
+    baseline.current = draftFromDevice(saved);
+    return saved;
+  }
+
+  async function persistPhotos(target: Device, files: File[]) {
+    const remain = [...files];
+    try {
+      while (remain.length) {
+        const file = remain[0];
+        await uploadFile("device", target.id, file, draftRef.current.restricted);
+        remain.shift();
+        photosRef.current = remain;
+        setPhotos([...remain]);
+      }
+    } finally {
+      photosRef.current = remain;
+      setPhotos(remain);
+    }
+  }
+
+  async function queueOrThrow(err: unknown, body: ReturnType<typeof payloadFromDraft>) {
+    const message = err instanceof Error ? err.message : "Save failed";
+    const offline = /offline|failed to fetch|network|503/i.test(message);
+    if (offline) {
+      const existing = savedRef.current;
+      enqueue({
+        method: existing ? "PATCH" : "POST",
+        path: existing ? `/api/projects/${projectId}/devices/${existing.id}` : `/api/projects/${projectId}/devices`,
+        body,
+      });
+      throw new Error(
+        photosRef.current.length
+          ? "No network — device fields queued. Photos need a connection; keep this window open and save again."
+          : "No network — queued for sync. You can close after the next successful save.",
+      );
+    }
+    throw err instanceof Error ? err : new Error(message);
+  }
+
+  async function persistAndNotify(opts?: { autoName?: boolean; files?: File[]; notify?: boolean }) {
+    if (persistLock.current) return persistLock.current;
+    const body = payloadFromDraft({
+      ...draftRef.current,
+      name: opts?.autoName ? suggestedDeviceName(draftRef.current.name, draftRef.current.ru_start) : draftRef.current.name,
+    });
+    const run = (async () => {
+      const saved = await persist(opts);
+      const files = opts?.files ?? photosRef.current;
+      if (files.length) await persistPhotos(saved, files);
+      setSavedDevice(saved);
+      if (opts?.notify !== false) onSaved(saved);
+      return saved;
+    })();
+    persistLock.current = run;
+    try {
+      return await run;
+    } catch (err) {
+      await queueOrThrow(err, body);
+      return undefined as never;
+    } finally {
+      persistLock.current = null;
+    }
+  }
+
+  const persistRef = useRef(persistAndNotify);
+  persistRef.current = persistAndNotify;
+  const dirtyRef = useRef(isDirty);
+  dirtyRef.current = isDirty;
+
+  useEffect(() => {
+    function flush() {
+      if (!dirtyRef.current()) return;
+      void persistRef.current({ autoName: true }).catch(() => undefined);
+    }
+    function onHide() {
+      if (document.visibilityState === "hidden") flush();
+    }
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onHide);
+      if (dirtyRef.current()) {
+        void persistRef.current({ autoName: true, notify: false }).catch(() => undefined);
+      }
+    };
+  }, []);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError("");
     try {
-      const body = payloadFromDraft(draft);
-      if (!body.name) {
-        setError("Device name is required.");
-        setBusy(false);
-        return;
-      }
-      const saved = device
-        ? await projects.updateDevice(projectId, device.id, body)
-        : await projects.addDevice(projectId, body);
-      if (!device && photos.length) {
-        await uploadPhotos("device", saved.id, photos, draft.restricted);
-      }
-      onSaved(saved);
+      const saved = await persistAndNotify();
+      onClose();
+      return saved;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleClose() {
+    if (busy) return;
+    if (!isDirty()) {
+      onClose();
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await persistAndNotify({ autoName: true });
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
@@ -995,8 +1128,38 @@ export function DeviceEditorModal({
     }
   }
 
-  const title = device
-    ? `Edit ${device.name}`
+  async function handlePendingPhotos(files: File[]) {
+    setPhotos(files);
+    setBusy(true);
+    setError("");
+    try {
+      await persistAndNotify({ autoName: true, files });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save photo");
+      throw err;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function selectNested(next: Device) {
+    if (isDirty()) {
+      setBusy(true);
+      setError("");
+      try {
+        await persistAndNotify({ autoName: true });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Save failed");
+        setBusy(false);
+        return;
+      }
+      setBusy(false);
+    }
+    onSelectDevice?.(next);
+  }
+
+  const title = savedDevice
+    ? `Edit ${savedDevice.name}`
     : draft.ru_start
       ? `Add device at U${draft.ru_start}`
       : "Add device";
@@ -1022,8 +1185,8 @@ export function DeviceEditorModal({
                 Delete
               </button>
             )}
-            <button type="button" className="btn" onClick={onClose}>
-              Close
+            <button type="button" className="btn" onClick={handleClose} disabled={busy}>
+              {busy ? "Saving…" : "Close"}
             </button>
           </span>
         </div>
@@ -1032,7 +1195,7 @@ export function DeviceEditorModal({
           <p className="muted">
             Inside:{" "}
             {onSelectDevice ? (
-              <button type="button" className="linkish" onClick={() => onSelectDevice(parent)}>
+              <button type="button" className="linkish" onClick={() => selectNested(parent)}>
                 {parent.name}
               </button>
             ) : (
@@ -1047,7 +1210,7 @@ export function DeviceEditorModal({
               {nested.map((child) => (
                 <li key={child.id}>
                   {onSelectDevice ? (
-                    <button type="button" className="linkish" onClick={() => onSelectDevice(child)}>
+                    <button type="button" className="linkish" onClick={() => selectNested(child)}>
                       {child.name}
                     </button>
                   ) : (
@@ -1072,11 +1235,11 @@ export function DeviceEditorModal({
           devices={devices}
           pdus={pdus}
           showLocation={showLocation}
-          savedDeviceId={device?.id}
+          savedDeviceId={savedDevice?.id}
           projectId={projectId}
           project={project}
           pendingPhotos={creating ? photos : undefined}
-          onPendingPhotos={creating ? setPhotos : undefined}
+          onPendingPhotos={creating ? handlePendingPhotos : undefined}
         />
         <button className="btn primary block" disabled={busy}>
           {busy ? "Saving…" : creating ? "Save device" : "Save changes"}

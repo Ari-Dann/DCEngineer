@@ -60,7 +60,7 @@ async function raw(path: string, init: RequestInit = {}, token?: string) {
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  return fetch(path, { ...init, headers });
+  return fetch(path, { ...init, cache: "no-store", headers });
 }
 
 export async function api<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {

@@ -1,4 +1,4 @@
-const CACHE = "dce-shell-v1";
+const CACHE = "dce-shell-v2";
 const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -21,7 +21,7 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
   if (url.pathname.startsWith("/api/")) {
     event.respondWith(
-      fetch(req).catch(() => new Response(JSON.stringify({ detail: "offline" }), { status: 503 }))
+      fetch(req, { cache: "no-store" }).catch(() => new Response(JSON.stringify({ detail: "offline" }), { status: 503 }))
     );
     return;
   }

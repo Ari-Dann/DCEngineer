@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   AisleRow,
@@ -29,6 +29,7 @@ import { ItemSelect, SelectMode, SelectModeToggle, SelectionToolbar } from "../c
 import AiImageParse, { EntryMode, EntryModeRadios } from "../components/AiImageParse";
 import RestrictionPicker, { SavedRestrictionPicker } from "../components/RestrictionPicker";
 import { parseIdParam, projectHref, rackHref } from "../nav";
+import { nextLoad } from "../loadGuard";
 import {
   inheritedPhotoBlockers,
   photosAllowed,
@@ -131,25 +132,40 @@ export default function Project() {
     traced: true,
     notes: "",
   });
+  const loadSeq = useRef({ id: 0 });
 
   async function load() {
+    const gen = nextLoad(loadSeq.current);
     try {
       const p = await projects.get(pid);
+      const nextAreas = await projects.areas(pid);
+      const nextRows = await projects.rows(pid);
+      const nextRacks = await projects.racks(pid);
+      const nextDevices = await projects.devices(pid);
+      const nextPdus = await projects.projectPdus(pid);
+      const nextCables = await projects.cables(pid);
+      const nextLists = await projects.checklists(pid);
+      const nextHands = await projects.handoffs(pid);
+      if (!gen.isCurrent()) return;
       setProject(p);
-      setAreas(await projects.areas(pid));
-      setAisleRows(await projects.rows(pid));
-      setRacks(await projects.racks(pid));
-      setDevices(await projects.devices(pid));
-      setPdus(await projects.projectPdus(pid));
-      setCables(await projects.cables(pid));
-      setLists(await projects.checklists(pid));
-      setHands(await projects.handoffs(pid));
+      setAreas(nextAreas);
+      setAisleRows(nextRows);
+      setRacks(nextRacks);
+      setDevices(nextDevices);
+      setPdus(nextPdus);
+      setCables(nextCables);
+      setLists(nextLists);
+      setHands(nextHands);
     } catch (e) {
+      if (!gen.isCurrent()) return;
       setError(e instanceof Error ? e.message : "Load failed");
     }
   }
   useEffect(() => {
     load();
+    return () => {
+      nextLoad(loadSeq.current);
+    };
   }, [pid]);
 
   useEffect(() => {
@@ -1284,7 +1300,6 @@ export default function Project() {
           pdus={pdus}
           onClose={() => setEditing(null)}
           onSaved={() => {
-            setEditing(null);
             load();
           }}
           onSelectDevice={setEditing}

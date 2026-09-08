@@ -5,6 +5,63 @@ def test_health(client):
     res = client.get("/api/health")
     assert res.status_code == 200
     assert res.json()["status"] == "ok"
+    cache = res.headers.get("Cache-Control", "")
+    assert "no-store" in cache
+
+
+def test_api_mutations_are_not_cached(client):
+    res = client.post("/api/auth/login", json={"username": "admin", "password": "wrong"})
+    assert "no-store" in res.headers.get("Cache-Control", "")
+
+
+def test_rack_edits_survive_later_elevation_read(client, auth):
+    project = client.post("/api/projects", headers=auth, json={"name": "Phone save"}).json()
+    pid = project["id"]
+    area = client.post(f"/api/projects/{pid}/areas", headers=auth, json={"name": "A"}).json()
+    row = client.post(f"/api/projects/{pid}/rows", headers=auth, json={"name": "A10", "area_id": area["id"]}).json()
+    rack_a = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "A10R05", "area_id": area["id"], "row_id": row["id"], "ru_height": 42},
+    ).json()
+    rack_b = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "A10R06", "area_id": area["id"], "row_id": row["id"], "ru_height": 42},
+    ).json()
+    imported = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={"name": "imported-sw", "rack_id": rack_a["id"], "ru_start": 40, "ru_end": 41, "device_type": "switch"},
+    ).json()
+    gone = client.delete(f"/api/projects/{pid}/devices/{imported['id']}", headers=auth)
+    assert gone.status_code == 200
+    added = client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={"name": "leaf-a10r05", "rack_id": rack_a["id"], "ru_start": 40, "ru_end": 41, "serial": "FCW1"},
+    ).json()
+    photo = client.post(
+        "/api/attachments",
+        headers=auth,
+        data={"entity_type": "device", "entity_id": str(added["id"])},
+        files={"file": ("capture.jpg", BytesIO(b"\xff\xd8fake"), "image/jpeg")},
+    )
+    assert photo.status_code == 201, photo.text
+
+    other = client.get(f"/api/projects/{pid}/racks/{rack_b['id']}/elevation", headers=auth)
+    assert other.status_code == 200
+    assert other.json()["rack"]["name"] == "A10R06"
+
+    back = client.get(f"/api/projects/{pid}/racks/{rack_a['id']}/elevation", headers=auth)
+    assert back.status_code == 200
+    assert "no-store" in back.headers.get("Cache-Control", "")
+    names = {d["name"] for d in back.json()["devices"]}
+    assert names == {"leaf-a10r05"}
+    photos = client.get("/api/attachments", headers=auth, params={"entity_type": "device", "entity_id": added["id"]})
+    assert photos.status_code == 200
+    assert len(photos.json()) == 1
+    assert "no-store" in photos.headers.get("Cache-Control", "")
 
 
 def test_login_rejects_bad_password(client):

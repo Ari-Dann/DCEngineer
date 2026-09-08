@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AisleRow, Area, Device, Elevation, PDU, Project, Rack, downloadAuth, layoutPath, projects } from "../api";
 import { formatHierarchyPower, sumDcAmps, sumPowerWatts } from "../power";
@@ -9,6 +9,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import RestrictionPicker from "../components/RestrictionPicker";
 import { parseIdParam, projectHref } from "../nav";
 import { inheritedPhotoBlockers, photosAllowed, restrictionFields, restrictionTypeOf } from "../restriction";
+import { nextLoad } from "../loadGuard";
 
 function deviceTypeClass(type?: string) {
   const slug = (type || "other")
@@ -40,23 +41,40 @@ export default function RackPage() {
     null,
   );
   const [height, setHeight] = useState(42);
+  const loadSeq = useRef({ id: 0 });
 
   async function load() {
+    const gen = nextLoad(loadSeq.current);
+    const targetPid = pid;
+    const targetRid = rid;
     try {
-      const next = await projects.elevation(pid, rid);
+      const next = await projects.elevation(targetPid, targetRid);
+      const nextPdus = await projects.pdus(targetPid, targetRid);
+      const nextRacks = await projects.racks(targetPid);
+      const nextAreas = await projects.areas(targetPid);
+      const nextRows = await projects.rows(targetPid);
+      const nextProject = await projects.get(targetPid);
+      if (!gen.isCurrent()) return;
       setElev(next);
       setHeight(next.rack.ru_height);
-      setPdus(await projects.pdus(pid, rid));
-      setRacks(await projects.racks(pid));
-      setAreas(await projects.areas(pid));
-      setAisleRows(await projects.rows(pid));
-      setProject(await projects.get(pid));
+      setPdus(nextPdus);
+      setRacks(nextRacks);
+      setAreas(nextAreas);
+      setAisleRows(nextRows);
+      setProject(nextProject);
+      setError("");
     } catch (e) {
+      if (!gen.isCurrent()) return;
       setError(e instanceof Error ? e.message : "Load failed");
     }
   }
   useEffect(() => {
+    setEditing(null);
+    setAdding(null);
     load();
+    return () => {
+      nextLoad(loadSeq.current);
+    };
   }, [pid, rid]);
 
   const byId = useMemo(() => {
@@ -292,7 +310,6 @@ export default function RackPage() {
           showLocation={false}
           onClose={() => setAdding(null)}
           onSaved={() => {
-            setAdding(null);
             load();
           }}
         />
@@ -311,7 +328,6 @@ export default function RackPage() {
           showLocation={false}
           onClose={() => setEditing(null)}
           onSaved={() => {
-            setEditing(null);
             load();
           }}
           onSelectDevice={setEditing}
