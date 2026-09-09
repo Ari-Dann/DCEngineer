@@ -10,7 +10,7 @@ type Props = {
   ocr?: boolean;
   onClose: () => void;
   onScan?: (value: string) => void;
-  onPhoto?: (file: File) => void;
+  onPhoto?: (file: File) => void | Promise<void>;
 };
 
 type DetectorCtor = new (opts: { formats: string[] }) => {
@@ -131,8 +131,8 @@ export default function CameraModal({ mode, title, initialHint, ocr = false, onC
         canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Capture failed"))), "image/jpeg", 0.88);
       });
       const file = new File([blob], `capture-${Date.now()}.jpg`, { type: "image/jpeg" });
+      await onPhoto?.(file);
       stop();
-      onPhoto?.(file);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Capture failed");

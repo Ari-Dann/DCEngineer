@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { AisleRow, Area, Device, PDU, Project, Rack, enqueue, layoutPath, projects, uploadPhotos } from "../api";
 import { DeviceEditorModal, DeviceFields, emptyDraft, payloadFromDraft } from "../components/DeviceEditor";
 import CreateRowsPanel from "../components/CreateRowsPanel";
@@ -9,6 +9,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { SavedRestrictionPicker } from "../components/RestrictionPicker";
 import { learnCatalog } from "../catalog";
 import { inheritedPhotoBlockers, photosAllowed, restrictionFields } from "../restriction";
+import { captureDraftHasWork, nextLoad, suggestedDeviceName } from "../loadGuard";
 
 export default function Capture() {
   const [plist, setPlist] = useState<Project[]>([]);
@@ -30,6 +31,14 @@ export default function Capture() {
   const [busy, setBusy] = useState(false);
   const [catalogNonce, setCatalogNonce] = useState(0);
   const [deviceMode, setDeviceMode] = useState<EntryMode>("manual");
+  const loadSeq = useRef({ id: 0 });
+  const deviceSeq = useRef({ id: 0 });
+  const draftRef = useRef(draft);
+  const photosRef = useRef(photos);
+  const pidRef = useRef(pid);
+  draftRef.current = draft;
+  photosRef.current = photos;
+  pidRef.current = pid;
 
   useEffect(() => {
     projects.list().then((rows) => {
@@ -45,12 +54,14 @@ export default function Capture() {
 
   async function reloadLayout() {
     if (!pid) return;
+    const gen = nextLoad(loadSeq.current);
     const [nextAreas, nextRows, nextRacks, nextPdus] = await Promise.all([
       projects.areas(Number(pid)),
       projects.rows(Number(pid)),
       projects.racks(Number(pid)),
       projects.projectPdus(Number(pid)),
     ]);
+    if (!gen.isCurrent()) return;
     setAreas(nextAreas);
     setAisleRows(nextRows);
     setRacks(nextRacks);
@@ -67,6 +78,58 @@ export default function Capture() {
     setDraft((d) => ({ ...d, rack_id: rid }));
   }, [rid]);
 
+  async function flushOpenDraft(rackId: number | "") {
+    const current = draftRef.current;
+    const currentPhotos = photosRef.current;
+    const projectId = pidRef.current;
+    if (!projectId || !captureDraftHasWork(current, currentPhotos.length)) return;
+    const body = payloadFromDraft({
+      ...current,
+      name: suggestedDeviceName(current.name, current.ru_start),
+      rack_id: rackId,
+    });
+    try {
+      const created = await projects.addDevice(Number(projectId), body);
+      if (currentPhotos.length) {
+        await uploadPhotos("device", created.id, currentPhotos, current.restricted);
+      }
+      await learnCatalog({
+        vendor: created.vendor,
+        model: created.model,
+        device_type: created.device_type,
+        function: created.function,
+      });
+      setCatalogNonce((n) => n + 1);
+      await loadDevices();
+    } catch {
+      enqueue({ method: "POST", path: `/api/projects/${projectId}/devices`, body });
+    }
+  }
+
+  function resetDraft(nextRack: number | "") {
+    const current = draftRef.current;
+    setDraft({
+      ...emptyDraft(nextRack),
+      device_type: current.device_type,
+      vendor: current.vendor,
+      fan_orientation: current.fan_orientation,
+      indicator_type: current.indicator_type,
+      indicator_color: current.indicator_type === "none" ? "none" : current.indicator_color,
+    });
+    setPhotos([]);
+  }
+
+  function assignRack(next: number | "") {
+    setRid((prev) => {
+      if (prev !== next && captureDraftHasWork(draftRef.current, photosRef.current.length)) {
+        void flushOpenDraft(prev);
+        resetDraft(next);
+        setMsg("Saved the previous device before switching racks.");
+      }
+      return next;
+    });
+  }
+
   const visibleRows = areaId ? aisleRows.filter((r) => r.area_id === areaId) : aisleRows;
   const visibleRacks = racks.filter((r) => {
     if (rowId && r.row_id !== rowId) return false;
@@ -76,7 +139,10 @@ export default function Capture() {
 
   async function loadDevices() {
     if (!pid) return;
-    setDevices(await projects.devices(Number(pid)));
+    const gen = nextLoad(deviceSeq.current);
+    const rows = await projects.devices(Number(pid));
+    if (!gen.isCurrent()) return;
+    setDevices(rows);
   }
   useEffect(() => {
     loadDevices().catch(() => undefined);
@@ -173,7 +239,7 @@ export default function Capture() {
               onChange={(e) => {
                 setAreaId(e.target.value ? Number(e.target.value) : "");
                 setRowId("");
-                setRid("");
+                assignRack("");
               }}
             >
               <option value="">All areas / unlocated</option>
@@ -198,13 +264,13 @@ export default function Capture() {
           onAreaChange={(next) => {
             setAreaId(next);
             setRowId("");
-            setRid("");
+            assignRack("");
           }}
           onCreated={(created) => {
             reloadLayout().then(() => {
               if (created[0]) {
                 setRowId(created[0].id);
-                setRid("");
+                assignRack("");
               }
             });
           }}
@@ -220,7 +286,7 @@ export default function Capture() {
               value={rowId}
               onChange={(e) => {
                 setRowId(e.target.value ? Number(e.target.value) : "");
-                setRid("");
+                assignRack("");
               }}
             >
               <option value="">All rows / unlocated</option>
@@ -233,7 +299,7 @@ export default function Capture() {
           </label>
           <label className="field">
             <span>Rack</span>
-            <select value={rid} onChange={(e) => setRid(e.target.value ? Number(e.target.value) : "")}>
+            <select value={rid} onChange={(e) => assignRack(e.target.value ? Number(e.target.value) : "")}>
               <option value="">Unlocated</option>
               {visibleRacks.map((r) => (
                 <option key={r.id} value={r.id}>
@@ -366,7 +432,6 @@ export default function Capture() {
           pdus={pdus}
           onClose={() => setEditing(null)}
           onSaved={() => {
-            setEditing(null);
             loadDevices();
           }}
           onSelectDevice={setEditing}
