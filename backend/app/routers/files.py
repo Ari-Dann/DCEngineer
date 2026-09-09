@@ -6,7 +6,7 @@ from app.backup import run_backup
 from app.config import get_settings
 from app.database import get_db
 from app.deps import WriteUser, get_current_user
-from app.media_paths import hierarchy_key
+from app.media_paths import hierarchy_key, key_basename
 from app.models import (
     AppBackup,
     Area,
@@ -49,7 +49,7 @@ async def upload_attachment(
     row = Attachment(
         entity_type=entity_type,
         entity_id=entity_id,
-        filename=file.filename or "upload.bin",
+        filename=key_basename(key),
         content_type=file.content_type or "application/octet-stream",
         size=len(data),
         storage_key=key,

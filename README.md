@@ -252,7 +252,7 @@ Only an **Admin** can rename or delete an entire project.
 
 **Capture photo** uses `getUserMedia` and a canvas JPEG. Files are uploaded as attachments on the current entity (device, rack, row, area, project, inspection, incident, or work order). Multiple photos per device are supported. Tag a project, area, **individual row**, rack, or device as **government / EMSS** to block photography of that item. Rows in the same area are independent: tagging A01 does not tag A04. Racks and devices inside a tagged row still cannot be photographed.
 
-On the files volume (`STORAGE_LOCAL_PATH`, default `/data/files`) captures are stored as `Project/Area/Axx/Rxx/RUnn/{timestamp}.ext` at the depth you photographed (project, area, row, rack, or device). Unknown levels are omitted — no `Unlocated` or `A00` placeholders.
+On the files volume (`STORAGE_LOCAL_PATH`, default `/data/files`) captures are stored as `Project/Area/Axx/Rxx/RUnn/Project_Area_Axx_Rxx_RUnn_YYYY_MM_DD.ext` at the depth you photographed (project, area, row, rack, or device). Unknown levels are omitted — no `Unlocated` or `A00` placeholders. Existing files are renamed to this scheme on startup.
 
 ### Vision sidecar (optional)
 

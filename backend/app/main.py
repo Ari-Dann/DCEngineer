@@ -39,6 +39,13 @@ async def lifespan(_app: FastAPI):
         seed_templates(db)
         bootstrap_admin(db)
         bootstrap_sidecar(db)
+        from app.media_paths import relabel_stored_attachments
+
+        try:
+            result = relabel_stored_attachments(db)
+            log.info("Relabeled stored captures: %s", result)
+        except Exception:
+            log.exception("Could not relabel stored captures")
     finally:
         db.close()
     task = asyncio.create_task(backup_loop())

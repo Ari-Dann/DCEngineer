@@ -1,11 +1,13 @@
 """Human-readable storage keys for inventory / vision captures.
 
 Photos land under Project/Area/Axx/Rxx/RUnn at the capture depth — missing
-levels are omitted rather than filled with placeholders.
+levels are omitted rather than filled with placeholders. The file itself is
+named Project_Area_Row_Rack_RUnn_YYYY_MM_DD.ext.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -16,6 +18,7 @@ from app.config import get_settings
 from app.models import (
     AisleRow,
     Area,
+    Attachment,
     Device,
     Incident,
     Inspection,
@@ -25,6 +28,8 @@ from app.models import (
     WorkOrder,
 )
 from app.storage import StorageBackend, get_storage
+
+log = logging.getLogger("dcengineer")
 
 MAX_KEY_LEN = 512
 UNSORTED = "unsorted"
@@ -87,17 +92,78 @@ def file_extension(filename: str) -> str:
     return f".{ext.lower()}" if ext else ""
 
 
+def date_stamp(now: datetime | None = None) -> str:
+    return now_in_app_tz(now).strftime("%Y_%m_%d")
+
+
+def filename_token(segment: str) -> str:
+    return (segment or "").replace(" ", "_")
+
+
+def key_basename(key: str) -> str:
+    return (key or "").replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def hierarchy_segments(
+    project: str | None,
+    area: str | None,
+    row: str | None,
+    rack: str | None,
+    ru_value: int | None,
+) -> list[str]:
+    parts: list[str] = []
+    if project is not None:
+        parts.append(sanitize_segment(project, fallback="unnamed"))
+    if area is not None:
+        seg = sanitize_segment(area, fallback="unnamed")
+        if seg:
+            parts.append(seg)
+    if row is not None:
+        seg = format_row_segment(row)
+        if seg:
+            parts.append(seg)
+    if rack is not None:
+        seg = format_rack_segment(rack)
+        if seg:
+            parts.append(seg)
+    if ru_value:
+        parts.append(format_ru_segment(ru_value))
+    return [p for p in parts if p]
+
+
+def hierarchy_filename(parts: list[str], filename: str, now: datetime | None = None) -> str:
+    tokens = [filename_token(p) for p in parts if p] or [UNSORTED]
+    tokens.append(date_stamp(now))
+    stem = "_".join(tokens)
+    ext = file_extension(filename)
+    name = f"{stem}{ext}"
+    if len(name) <= 255:
+        return name
+    keep = 255 - len(ext)
+    return f"{stem[-keep:] if keep > 0 else stem[:255]}{ext}"
+
+
 def timestamp_filename(filename: str, now: datetime | None = None) -> str:
-    stem = now_in_app_tz(now).strftime("%Y-%m-%d-%H-%M-%S")
-    return f"{stem}{file_extension(filename)}"
+    """Deprecated alias; new captures use hierarchy_filename()."""
+    return f"{date_stamp(now)}{file_extension(filename)}"
 
 
-def _unique_key(storage: StorageBackend, directory: str, filename: str) -> str:
+def _unique_key(
+    storage: StorageBackend,
+    directory: str,
+    filename: str,
+    ignore_keys: set[str] | None = None,
+) -> str:
+    ignore = ignore_keys or set()
+
     def join(name: str) -> str:
         return f"{directory}/{name}" if directory else name
 
+    def available(key: str) -> bool:
+        return key in ignore or not storage.exists(key)
+
     candidate = join(filename)
-    if not storage.exists(candidate):
+    if available(candidate):
         return _clamp(candidate)
     stem, ext = filename, ""
     if "." in filename:
@@ -106,7 +172,7 @@ def _unique_key(storage: StorageBackend, directory: str, filename: str) -> str:
     n = 2
     while n < 10_000:
         candidate = join(f"{stem}-{n}{ext}")
-        if not storage.exists(candidate):
+        if available(candidate):
             return _clamp(candidate)
         n += 1
     raise RuntimeError("too many capture-key collisions")
@@ -220,24 +286,8 @@ def hierarchy_prefix(
     ru: int | None = None,
 ) -> str:
     project, area, row, rack, ru_value = resolve_hierarchy(db, entity_type, entity_id, ru=ru)
-    parts: list[str] = []
-    if project is not None:
-        parts.append(sanitize_segment(project, fallback="unnamed"))
-    if area is not None:
-        seg = sanitize_segment(area, fallback="unnamed")
-        if seg:
-            parts.append(seg)
-    if row is not None:
-        seg = format_row_segment(row)
-        if seg:
-            parts.append(seg)
-    if rack is not None:
-        seg = format_rack_segment(rack)
-        if seg:
-            parts.append(seg)
-    if ru_value:
-        parts.append(format_ru_segment(ru_value))
-    return "/".join(p for p in parts if p) or UNSORTED
+    parts = hierarchy_segments(project, area, row, rack, ru_value)
+    return "/".join(parts) if parts else UNSORTED
 
 
 def hierarchy_key(
@@ -249,7 +299,72 @@ def hierarchy_key(
     now: datetime | None = None,
     ru: int | None = None,
     storage: StorageBackend | None = None,
+    ignore_keys: set[str] | None = None,
 ) -> str:
-    prefix = hierarchy_prefix(db, entity_type, entity_id, ru=ru)
-    name = timestamp_filename(filename, now=now)
-    return _unique_key(storage or get_storage(), prefix, name)
+    project, area, row, rack, ru_value = resolve_hierarchy(db, entity_type, entity_id, ru=ru)
+    parts = hierarchy_segments(project, area, row, rack, ru_value)
+    prefix = "/".join(parts) if parts else UNSORTED
+    name = hierarchy_filename(parts, filename, now=now)
+    return _unique_key(storage or get_storage(), prefix, name, ignore_keys=ignore_keys)
+
+
+_ENTITY_SPECIFICITY = {
+    "device": 60,
+    "rack": 50,
+    "aisle_row": 40,
+    "row": 40,
+    "area": 30,
+    "vision_session": 20,
+    "project": 10,
+    "incident": 5,
+    "inspection": 5,
+    "work_order": 5,
+}
+
+
+def relabel_stored_attachments(db: Session, storage: StorageBackend | None = None) -> dict[str, int]:
+    """Move existing captures onto Project_Area_Row_Rack_RU_YYYY_MM_DD names.
+
+    Uses each file's original upload date. Attachments that share a storage key
+    (vision evidence copied onto a device) are moved once.
+    """
+    backend = storage or get_storage()
+    rows = db.query(Attachment).order_by(Attachment.id).all()
+    by_key: dict[str, list[Attachment]] = {}
+    for row in rows:
+        if not row.storage_key:
+            continue
+        by_key.setdefault(row.storage_key, []).append(row)
+
+    renamed = 0
+    skipped = 0
+    missing = 0
+    for old_key, group in by_key.items():
+        primary = max(group, key=lambda item: (_ENTITY_SPECIFICITY.get(item.entity_type, 0), item.id))
+        source_name = primary.filename or key_basename(old_key) or "capture.bin"
+        new_key = hierarchy_key(
+            db,
+            primary.entity_type,
+            primary.entity_id,
+            source_name,
+            now=primary.created_at,
+            storage=backend,
+            ignore_keys={old_key},
+        )
+        basename = key_basename(new_key)
+        already = old_key == new_key and all(item.filename == basename for item in group)
+        if already:
+            skipped += 1
+            continue
+        if old_key != new_key:
+            if not backend.exists(old_key):
+                log.warning("Skipping missing capture %s (%s)", old_key, primary.id)
+                missing += 1
+                continue
+            backend.move(old_key, new_key)
+        for item in group:
+            item.storage_key = new_key
+            item.filename = basename
+        renamed += 1
+    db.commit()
+    return {"renamed": renamed, "skipped": skipped, "missing": missing}
