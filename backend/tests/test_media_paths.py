@@ -9,16 +9,17 @@ from app.media_paths import (
     file_extension,
     format_rack_segment,
     format_row_segment,
+    hierarchy_filename,
     hierarchy_key,
+    relabel_stored_attachments,
     sanitize_segment,
-    timestamp_filename,
 )
 from app.models import Attachment
 from app.storage import LocalStorage, get_storage, new_key
 
 JPEG = b"\xff\xd8fakejpeg"
 FIXED = datetime(2026, 8, 31, 9, 24, 0, tzinfo=timezone.utc)
-STAMP = "2026-08-31-09-24-00"
+STAMP = "2026_08_31"
 
 
 def _files_root() -> Path:
@@ -112,12 +113,13 @@ def test_sanitize_and_extension():
     assert file_extension("../../etc/passwd.jpg") == ".jpg"
 
 
-def test_timestamp_filename_format_and_tz(monkeypatch):
-    name = timestamp_filename("shot.PNG", now=FIXED)
-    assert name == f"{STAMP}.png"
+def test_hierarchy_filename_format_and_tz(monkeypatch):
+    name = hierarchy_filename(["Test1", "Staging", "A03", "R05", "RU42"], "shot.PNG", now=FIXED)
+    assert name == f"Test1_Staging_A03_R05_RU42_{STAMP}.png"
     monkeypatch.setattr("app.media_paths.get_settings", lambda: type("S", (), {"tz": "America/New_York"})())
-    eastern = timestamp_filename("x.jpg", now=FIXED)
-    assert eastern == "2026-08-31-05-24-00.jpg"
+    overnight = datetime(2026, 8, 31, 3, 0, 0, tzinfo=timezone.utc)
+    eastern = hierarchy_filename(["Hall A"], "x.jpg", now=overnight)
+    assert eastern == "Hall_A_2026_08_30.jpg"
 
 
 def test_storage_still_rejects_path_escape(tmp_path):
@@ -139,7 +141,8 @@ def test_device_capture_uses_full_hierarchy(client, auth):
     with patch("app.media_paths.now_in_app_tz", return_value=FIXED):
         att = _upload(client, auth, "device", device["id"])
     key = _key(att["id"])
-    assert key == f"Test1/Staging/A03/R05/RU42/{STAMP}.jpg"
+    assert key == f"Test1/Staging/A03/R05/RU42/Test1_Staging_A03_R05_RU42_{STAMP}.jpg"
+    assert att["filename"] == f"Test1_Staging_A03_R05_RU42_{STAMP}.jpg"
     assert (_files_root() / key).read_bytes() == JPEG
     dl = client.get(f"/api/attachments/{att['id']}/download", headers=auth)
     assert dl.status_code == 200
@@ -157,11 +160,11 @@ def test_area_row_rack_and_project_depths(client, auth):
         row_att = _upload(client, auth, "row", row["id"])
         aisle_att = _upload(client, auth, "aisle_row", row["id"], filename="aisle.png")
         rack_att = _upload(client, auth, "rack", rack["id"])
-    assert _key(project_att["id"]) == f"DepthSite/{STAMP}.jpg"
-    assert _key(area_att["id"]) == f"DepthSite/Staging/{STAMP}.jpg"
-    assert _key(row_att["id"]) == f"DepthSite/Staging/A03/{STAMP}.jpg"
-    assert _key(aisle_att["id"]) == f"DepthSite/Staging/A03/{STAMP}.png"
-    assert _key(rack_att["id"]) == f"DepthSite/Staging/A03/R05/{STAMP}.jpg"
+    assert _key(project_att["id"]) == f"DepthSite/DepthSite_{STAMP}.jpg"
+    assert _key(area_att["id"]) == f"DepthSite/Staging/DepthSite_Staging_{STAMP}.jpg"
+    assert _key(row_att["id"]) == f"DepthSite/Staging/A03/DepthSite_Staging_A03_{STAMP}.jpg"
+    assert _key(aisle_att["id"]) == f"DepthSite/Staging/A03/DepthSite_Staging_A03_{STAMP}.png"
+    assert _key(rack_att["id"]) == f"DepthSite/Staging/A03/R05/DepthSite_Staging_A03_R05_{STAMP}.jpg"
     assert "RU" not in _key(area_att["id"])
     assert "R05" not in _key(row_att["id"])
     assert "RU" not in _key(rack_att["id"])
@@ -178,7 +181,7 @@ def test_device_without_ru_stops_at_rack(client, auth):
     with patch("app.media_paths.now_in_app_tz", return_value=FIXED):
         att = _upload(client, auth, "device", device["id"])
     key = _key(att["id"])
-    assert key == f"NoRuSite/Staging/A12/R01/{STAMP}.jpg"
+    assert key == f"NoRuSite/Staging/A12/R01/NoRuSite_Staging_A12_R01_{STAMP}.jpg"
     assert "RU" not in key
 
 
@@ -188,7 +191,7 @@ def test_unlocated_device_stays_under_project(client, auth):
     with patch("app.media_paths.now_in_app_tz", return_value=FIXED):
         att = _upload(client, auth, "device", device["id"])
     key = _key(att["id"])
-    assert key == f"LooseGear/{STAMP}.jpg"
+    assert key == f"LooseGear/LooseGear_{STAMP}.jpg"
     assert "Unlocated" not in key
     assert "A00" not in key
 
@@ -199,9 +202,9 @@ def test_collision_suffix(client, auth):
         first = _upload(client, auth, "project", project["id"])
         second = _upload(client, auth, "project", project["id"])
         third = _upload(client, auth, "project", project["id"])
-    assert _key(first["id"]) == f"Collide/{STAMP}.jpg"
-    assert _key(second["id"]) == f"Collide/{STAMP}-2.jpg"
-    assert _key(third["id"]) == f"Collide/{STAMP}-3.jpg"
+    assert _key(first["id"]) == f"Collide/Collide_{STAMP}.jpg"
+    assert _key(second["id"]) == f"Collide/Collide_{STAMP}-2.jpg"
+    assert _key(third["id"]) == f"Collide/Collide_{STAMP}-3.jpg"
 
 
 def test_nasty_project_name_does_not_escape(client, auth):
@@ -241,7 +244,7 @@ def test_vision_clip_uses_session_rack_depth(client, auth):
         )
     assert clip.status_code == 201, clip.text
     key = _key(clip.json()["attachment_id"])
-    assert key == f"VisionPath/Staging/A03/R05/{STAMP}.jpg"
+    assert key == f"VisionPath/Staging/A03/R05/VisionPath_Staging_A03_R05_{STAMP}.jpg"
     assert "RU" not in key
     assert (_files_root() / key).read_bytes() == JPEG
     dl = client.get(f"/api/attachments/{clip.json()['attachment_id']}/download", headers=auth)
@@ -266,7 +269,7 @@ def test_vision_area_only_clip_omits_row_rack(client, auth):
         )
     assert clip.status_code == 201, clip.text
     key = _key(clip.json()["attachment_id"])
-    assert key == f"VisionArea/Staging/{STAMP}.jpg"
+    assert key == f"VisionArea/Staging/VisionArea_Staging_{STAMP}.jpg"
     assert "A03" not in key
     assert "R05" not in key
 
@@ -301,4 +304,112 @@ def test_hierarchy_key_direct_with_frozen_now(client, auth):
     device = _device(client, auth, project["id"], "leaf", rack["id"], ru_start=42)
     with SessionLocal() as db:
         key = hierarchy_key(db, "device", device["id"], "face.jpg", now=FIXED)
-    assert key == f"DirectKey/Staging/A03/R05/RU42/{STAMP}.jpg"
+    assert key == f"DirectKey/Staging/A03/R05/RU42/DirectKey_Staging_A03_R05_RU42_{STAMP}.jpg"
+
+
+def test_relabel_rewrites_timestamp_and_uuid_keys(client, auth):
+    project = _project(client, auth, "RelabelMe")
+    area = _area(client, auth, project["id"], "Staging")
+    row = _row(client, auth, project["id"], "3", area["id"])
+    rack = _rack(client, auth, project["id"], "5", area["id"], row["id"])
+    device = _device(client, auth, project["id"], "leaf", rack["id"], ru_start=42)
+    storage = get_storage()
+    old_hier = "RelabelMe/Staging/A03/R05/RU42/2026-08-31-09-24-00.jpg"
+    storage.put(old_hier, JPEG)
+    uuid_key = new_key("legacy.jpg")
+    storage.put(uuid_key, b"\xff\xd8legacy")
+    with SessionLocal() as db:
+        hier = Attachment(
+            entity_type="device",
+            entity_id=device["id"],
+            filename="capture.jpg",
+            content_type="image/jpeg",
+            size=len(JPEG),
+            storage_key=old_hier,
+            created_at=FIXED,
+        )
+        loose = Attachment(
+            entity_type="project",
+            entity_id=project["id"],
+            filename="legacy.jpg",
+            content_type="image/jpeg",
+            size=9,
+            storage_key=uuid_key,
+            created_at=FIXED,
+        )
+        db.add_all([hier, loose])
+        db.commit()
+        hid, lid = hier.id, loose.id
+        result = relabel_stored_attachments(db)
+    assert result["renamed"] >= 2
+    assert _key(hid) == f"RelabelMe/Staging/A03/R05/RU42/RelabelMe_Staging_A03_R05_RU42_{STAMP}.jpg"
+    assert _key(lid) == f"RelabelMe/RelabelMe_{STAMP}.jpg"
+    with SessionLocal() as db:
+        assert db.get(Attachment, hid).filename == f"RelabelMe_Staging_A03_R05_RU42_{STAMP}.jpg"
+    assert not storage.exists(old_hier)
+    assert not storage.exists(uuid_key)
+    assert storage.get(_key(hid)) == JPEG
+    assert storage.get(_key(lid)) == b"\xff\xd8legacy"
+    with SessionLocal() as db:
+        again = relabel_stored_attachments(db)
+    assert again["renamed"] == 0
+
+
+def test_relabel_moves_shared_storage_key_once(client, auth):
+    project = _project(client, auth, "ShareKey")
+    area = _area(client, auth, project["id"], "Staging")
+    row = _row(client, auth, project["id"], "3", area["id"])
+    rack = _rack(client, auth, project["id"], "5", area["id"], row["id"])
+    device = _device(client, auth, project["id"], "leaf", rack["id"], ru_start=10)
+    storage = get_storage()
+    old = "ShareKey/Staging/A03/R05/2026-08-31-09-24-00.jpg"
+    storage.put(old, JPEG)
+    with SessionLocal() as db:
+        rack_att = Attachment(
+            entity_type="rack",
+            entity_id=rack["id"],
+            filename="face.jpg",
+            content_type="image/jpeg",
+            size=len(JPEG),
+            storage_key=old,
+            created_at=FIXED,
+        )
+        device_att = Attachment(
+            entity_type="device",
+            entity_id=device["id"],
+            filename="face.jpg",
+            content_type="image/jpeg",
+            size=len(JPEG),
+            storage_key=old,
+            created_at=FIXED,
+        )
+        db.add_all([rack_att, device_att])
+        db.commit()
+        rid, did = rack_att.id, device_att.id
+        relabel_stored_attachments(db)
+    key = _key(did)
+    assert key == f"ShareKey/Staging/A03/R05/RU10/ShareKey_Staging_A03_R05_RU10_{STAMP}.jpg"
+    assert _key(rid) == key
+    assert storage.exists(key)
+    assert not storage.exists(old)
+    assert storage.get(key) == JPEG
+
+
+def test_relabel_skips_missing_file(client, auth):
+    project = _project(client, auth, "GhostFile")
+    with SessionLocal() as db:
+        row = Attachment(
+            entity_type="project",
+            entity_id=project["id"],
+            filename="gone.jpg",
+            content_type="image/jpeg",
+            size=1,
+            storage_key="GhostFile/missing.jpg",
+            created_at=FIXED,
+        )
+        db.add(row)
+        db.commit()
+        aid = row.id
+        result = relabel_stored_attachments(db)
+    assert result["missing"] >= 1
+    assert _key(aid) == "GhostFile/missing.jpg"

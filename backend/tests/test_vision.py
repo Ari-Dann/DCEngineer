@@ -276,14 +276,14 @@ def test_vision_proposal_staging_accept_reject_and_audit(client, auth):
         params={"entity_type": "device", "entity_id": str(device["id"])},
     ).json()
     assert any(a["id"] != clip["attachment_id"] for a in evidence) or evidence
-    assert any(a["filename"] == "serial-frame.jpg" for a in evidence)
+    assert any(a["filename"].endswith(".jpg") for a in evidence)
     originals = client.get(
         "/api/attachments",
         headers=auth,
         params={"entity_type": "vision_session", "entity_id": str(session["id"])},
     ).json()
-    assert any(a["filename"] == "serial.jpg" for a in originals)
-    assert any(a["filename"] == "serial-frame.jpg" for a in originals)
+    assert any("Aisle_Capture" in a["filename"] and a["filename"].endswith(".jpg") for a in originals)
+    assert len(originals) >= 2
 
     rejected = client.post(
         f"/api/vision/sessions/{session['id']}/proposals/{proposals[1]['id']}/reject",

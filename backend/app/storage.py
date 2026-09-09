@@ -16,6 +16,7 @@ class StorageBackend(Protocol):
     def get(self, key: str) -> bytes: ...
     def delete(self, key: str) -> None: ...
     def exists(self, key: str) -> bool: ...
+    def move(self, src: str, dst: str) -> None: ...
 
 
 def new_key(filename: str) -> str:
@@ -52,6 +53,14 @@ class LocalStorage:
 
     def exists(self, key: str) -> bool:
         return self._path(key).exists()
+
+    def move(self, src: str, dst: str) -> None:
+        if src == dst:
+            return
+        source = self._path(src)
+        dest = self._path(dst)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        source.replace(dest)
 
 
 class SFTPStorage:
@@ -135,6 +144,13 @@ class SFTPStorage:
         finally:
             client.close()
         return found
+
+    def move(self, src: str, dst: str) -> None:
+        if src == dst:
+            return
+        data = self.get(src)
+        self.put(dst, data)
+        self.delete(src)
 
     @staticmethod
     def _mkdirs(sftp, path: str) -> None:

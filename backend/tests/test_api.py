@@ -1710,7 +1710,7 @@ def test_visio_office_export_preserves_hierarchy_and_pictures(client, auth):
     xlsx_name = next(n for n in names if n.endswith(".xlsx") and "Data Visualizer" in n)
     picture_names = [n for n in names if n.startswith("Pictures/") and n.endswith(".jpg")]
     assert any("Hall A" in n and "A12" in n and "09" in n and "edge-fw" in n for n in picture_names)
-    assert any("rack-front.jpg" in n for n in picture_names)
+    assert any("Azure_DC_Hall_A_A12_R09" in n for n in picture_names)
     assert not any("secret.jpg" in n for n in names)
     assert any(n.startswith("Elevations/") and n.endswith("09.svg") for n in names)
 
@@ -1739,7 +1739,7 @@ def test_visio_office_export_preserves_hierarchy_and_pictures(client, auth):
     assert rack_row[3] == row_row[0]
     assert device_row[3] == rack_row[0]
     assert device_row[9] == "Acme Colo"
-    assert "faceplate.jpg" in (device_row[12] or "")
+    assert "Azure_DC_Hall_A_A12_R09_RU19" in (device_row[12] or "")
     assert any(r[1] == "spare-sw" for r in rows)
     assert unlocated["id"]
 

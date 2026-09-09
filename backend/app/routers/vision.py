@@ -41,7 +41,7 @@ from app.schemas import (
     VisionSessionStatusIn,
 )
 from app.vision_review import confirm_layout_field, confirm_proposal_field, skip_layout_field, skip_proposal_field
-from app.media_paths import hierarchy_key
+from app.media_paths import hierarchy_key, key_basename
 from app.storage import get_storage
 from app.vision_policy import (
     RESTRICTED_REFUSAL,
@@ -448,7 +448,7 @@ async def add_clip(
     attachment = Attachment(
         entity_type="vision_session",
         entity_id=session.id,
-        filename=file.filename or "clip.bin",
+        filename=key_basename(key),
         content_type=file.content_type or "application/octet-stream",
         size=len(data),
         storage_key=key,
