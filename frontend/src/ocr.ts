@@ -168,31 +168,121 @@ async function ocrWithTesseract(image: Blob): Promise<string> {
   return data.text || "";
 }
 
-export async function recognizeLabel(input: ImageBitmapSource | Blob): Promise<string> {
-  const source = input instanceof Blob ? await createImageBitmap(input) : input;
+export type ScanKind = "serial" | "asset_tag" | "management_ip" | "search";
+
+const IPV4 =
+  /\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g;
+const IPV6 = /\b(?:[0-9a-f]{1,4}:){2,7}[0-9a-f:.]+\b/gi;
+
+export function uniqueScanValues(values: string[], limit = 8): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of values) {
+    const value = (raw || "").replace(/\u0000/g, "").trim();
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(value.slice(0, 128));
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function extractIps(text: string, found: string[]) {
+  IPV4.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = IPV4.exec(text))) found.push(match[0]);
+  IPV6.lastIndex = 0;
+  while ((match = IPV6.exec(text))) {
+    const value = match[0];
+    if ((value.match(/:/g) || []).length >= 2) found.push(value);
+  }
+}
+
+export function ipCandidatesFromText(text: string): string[] {
+  const cleaned = (text || "").replace(/\u0000/g, " ");
+  if (!cleaned.trim()) return [];
+  const found: string[] = [];
+  for (const line of cleaned.split(/\r?\n/)) {
+    const labeled = line.match(/^(?:ip(?:v4|v6)?|mgmt|management(?:\s*ip)?|mgmt\s*ip|address)\s*[:#-]?\s*(.+)$/i);
+    if (labeled?.[1]) extractIps(labeled[1], found);
+  }
+  extractIps(cleaned, found);
+  return uniqueScanValues(found);
+}
+
+export function scanCandidatesFromText(text: string, kind: ScanKind): string[] {
+  if (kind === "management_ip") return ipCandidatesFromText(text);
+  const cleaned = (text || "").replace(/\u0000/g, " ").trim();
+  if (!cleaned) return [];
+  const fields = fieldsFromOcr(cleaned);
+  const found: string[] = [];
+  if (kind === "asset_tag") {
+    if (fields.asset_tag) found.push(fields.asset_tag);
+    if (fields.serial) found.push(fields.serial);
+  } else if (kind === "serial") {
+    if (fields.serial) found.push(fields.serial);
+    if (fields.asset_tag) found.push(fields.asset_tag);
+  } else {
+    if (fields.serial) found.push(fields.serial);
+    if (fields.asset_tag) found.push(fields.asset_tag);
+    if (fields.hostname) found.push(fields.hostname);
+    if (fields.name) found.push(fields.name);
+  }
+  const tokens = cleaned.split(/[\s,;|]+/).map(normalizeToken).filter(Boolean);
+  const ranked = [...new Set(tokens)].sort((a, b) => scoreToken(b) - scoreToken(a));
+  for (const token of ranked) {
+    if (scoreToken(token) >= 2) found.push(token);
+  }
+  if (kind === "search") {
+    const fallback = queryFromOcr(cleaned);
+    if (fallback) found.push(fallback);
+  }
+  return uniqueScanValues(found);
+}
+
+async function detectBarcodes(source: ImageBitmapSource): Promise<string[]> {
   try {
     const barcode = getDetector("BarcodeDetector");
-    if (barcode) {
-      const codes = await barcode.detect(source);
-      const value = codes[0]?.rawValue?.trim();
-      if (value) return value;
-    }
+    if (!barcode) return [];
+    const codes = await barcode.detect(source);
+    return uniqueScanValues(codes.map((code) => code.rawValue || ""));
   } catch {
-    /* fall through to text */
+    return [];
   }
+}
+
+async function detectText(source: ImageBitmapSource): Promise<string> {
   try {
     const text = getDetector("TextDetector");
-    if (text) {
-      const hits = await text.detect(source);
-      const picked = queryFromOcr(hits.map((hit) => hit.rawValue).filter(Boolean).join("\n"));
-      if (picked) return picked;
-    }
+    if (!text) return "";
+    const hits = await text.detect(source);
+    return hits.map((hit) => hit.rawValue).filter(Boolean).join("\n");
   } catch {
-    /* fall through to tesseract */
+    return "";
+  }
+}
+
+/** Barcodes and OCR candidates for a specific field. Empty when nothing readable. */
+export async function recognizeCandidates(input: ImageBitmapSource | Blob, kind: ScanKind): Promise<string[]> {
+  const source = input instanceof Blob ? await createImageBitmap(input) : input;
+  const found: string[] = [];
+  const codes = await detectBarcodes(source);
+  if (kind === "management_ip") {
+    for (const code of codes) found.push(...ipCandidatesFromText(code));
+  } else {
+    found.push(...codes);
   }
   const blob = input instanceof Blob ? input : await snapshot(source);
-  const tess = await ocrWithTesseract(blob);
-  return queryFromOcr(tess);
+  const combined = [await detectText(source), await ocrWithTesseract(blob)].filter(Boolean).join("\n");
+  found.push(...scanCandidatesFromText(combined, kind));
+  return uniqueScanValues(found);
+}
+
+export async function recognizeLabel(input: ImageBitmapSource | Blob): Promise<string> {
+  const [first] = await recognizeCandidates(input, "search");
+  return first || "";
 }
 
 /** Full barcode + OCR text from an image, for filling several device fields. */
