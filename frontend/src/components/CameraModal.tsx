@@ -316,17 +316,17 @@ export default function CameraModal({
               <button type="button" className="btn primary block" disabled={busy || !hasVideo} onClick={readTextFromCamera}>
                 {busy ? "Reading text…" : "Read text"}
               </button>
-              <button type="button" className="btn block" disabled={busy} onClick={() => fileRef.current?.click()}>
+              <label className="btn block">
                 Use a photo
-              </button>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                hidden
-                onChange={readTextFromFile}
-              />
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*,.png,.jpg,.jpeg,.webp"
+                  hidden
+                  disabled={busy}
+                  onChange={readTextFromFile}
+                />
+              </label>
             </>
           )}
           {mode === "scan" && (
