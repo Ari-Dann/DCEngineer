@@ -261,7 +261,7 @@ p { margin: 0 0 0.75rem; color: var(--muted); }
 .scan-field input { flex: 1; min-width: 0; width: auto; }
 .scan-field .btn { flex: 0 0 auto; }
 .scan-choices { display: grid; gap: 8px; margin: 0 0 12px; }
-.scan-choices .btn { text-align: left; word-break: break-all; }
+.scan-choices .btn { justify-content: flex-start; text-align: left; word-break: break-all; }
 .viewfield {
   min-height: 44px; padding: 10px 12px; border-radius: 10px;
   border: 1px dashed var(--border); background: var(--bg-elev);

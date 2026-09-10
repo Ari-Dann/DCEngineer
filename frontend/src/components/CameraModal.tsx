@@ -98,9 +98,14 @@ export default function CameraModal({
         if (mode === "scan") startScan();
       } catch (err) {
         setHasVideo(false);
-        setError(err instanceof Error ? err.message : "Camera permission denied");
+        const name = err instanceof DOMException ? err.name : "";
+        const raw = err instanceof Error ? err.message : "Camera permission denied";
+        const noCamera = /NotFoundError|DevicesNotFound|not found/i.test(`${name} ${raw}`);
+        setError(noCamera ? "" : raw);
         if (useOcr && mode === "scan") {
           setHint("No camera in this browser. Use a photo of the barcode, QR code, or printed label.");
+        } else if (noCamera) {
+          setHint("No camera in this browser. Line up the tag, then type the code.");
         }
       }
     })();
