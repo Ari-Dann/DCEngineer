@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Role, User, getSession, ops } from "../api";
+import ThemeToggle from "../components/ThemeToggle";
 
 const empty = { username: "", email: "", password: "", full_name: "", role: "engineer" as Role, is_active: true };
 
@@ -85,6 +86,10 @@ export default function Settings() {
         <h3>This device</h3>
         <p>Signed in as {me?.username} ({me?.role}). JWTAuth access token is stored on-device for the PWA / APK.</p>
         <p>{installHint}</p>
+        <div className="appearance-row">
+          <span className="muted">Appearance</span>
+          <ThemeToggle />
+        </div>
       </div>
       {me?.role === "admin" && (
         <>

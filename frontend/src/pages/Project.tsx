@@ -705,15 +705,6 @@ export default function Project() {
                   >
                     <strong>{r.name}</strong>
                   </button>
-                  <SavedRestrictionPicker
-                    name={`row-restriction-${r.id}`}
-                    entity={r}
-                    scope="row"
-                    compact
-                    inline
-                    inherited={inheritedPhotoBlockers({ project })}
-                    onPersist={(type) => persistRowRestriction(r, type)}
-                  />
                   <button
                     type="button"
                     className="list-meta muted"
@@ -724,9 +715,20 @@ export default function Project() {
                   </button>
                 </div>
               </div>
-              <button type="button" className="btn" onClick={() => setOpenRow(openRow === r.id ? null : r.id)}>
-                Photos
-              </button>
+              <div className="list-actions">
+                <SavedRestrictionPicker
+                  name={`row-restriction-${r.id}`}
+                  entity={r}
+                  scope="row"
+                  compact
+                  inline
+                  inherited={inheritedPhotoBlockers({ project })}
+                  onPersist={(type) => persistRowRestriction(r, type)}
+                />
+                <button type="button" className="btn" onClick={() => setOpenRow(openRow === r.id ? null : r.id)}>
+                  Photos
+                </button>
+              </div>
             </div>
             {editingRow?.id === r.id && (
               <form
@@ -889,15 +891,6 @@ export default function Project() {
                   >
                     <strong>{r.name}</strong>
                   </Link>
-                  <SavedRestrictionPicker
-                    name={`rack-restriction-${r.id}`}
-                    entity={r}
-                    scope="rack"
-                    compact
-                    inline
-                    inherited={inheritedPhotoBlockers({ project, row: parentRow })}
-                    onPersist={(type) => persistRackRestriction(r, type)}
-                  />
                   <Link
                     className="list-meta muted"
                     to={rackHref(pid, r.id, { area: r.area_id || areaFilter, row: r.row_id || rowFilter })}
@@ -907,6 +900,17 @@ export default function Project() {
                     {restrictionCaption(r)}
                   </Link>
                 </div>
+              </div>
+              <div className="list-actions">
+                <SavedRestrictionPicker
+                  name={`rack-restriction-${r.id}`}
+                  entity={r}
+                  scope="rack"
+                  compact
+                  inline
+                  inherited={inheritedPhotoBlockers({ project, row: parentRow })}
+                  onPersist={(type) => persistRackRestriction(r, type)}
+                />
               </div>
             </div>
             {editingRack?.id === r.id && (

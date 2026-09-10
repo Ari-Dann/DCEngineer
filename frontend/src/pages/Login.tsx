@@ -1,6 +1,7 @@
 import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { login } from "../api";
+import ThemeToggle from "../components/ThemeToggle";
 
 export default function Login() {
   const nav = useNavigate();
@@ -25,6 +26,9 @@ export default function Login() {
 
   return (
     <div className="login">
+      <header className="login-top">
+        <ThemeToggle />
+      </header>
       <form className="card" onSubmit={onSubmit}>
         <div className="brand" style={{ marginBottom: 16 }}>
           <img src="/icon.svg" alt="" />
