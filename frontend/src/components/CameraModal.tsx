@@ -1,5 +1,10 @@
 import { ChangeEvent, useEffect, useRef, useState } from "react";
-import { recognizeLabel } from "../ocr";
+import {
+  ipCandidatesFromText,
+  recognizeCandidates,
+  uniqueScanValues,
+  type ScanKind,
+} from "../ocr";
 
 type Mode = "scan" | "photo";
 
@@ -8,6 +13,7 @@ type Props = {
   title?: string;
   initialHint?: string;
   ocr?: boolean;
+  scanKind?: ScanKind;
   onClose: () => void;
   onScan?: (value: string) => void;
   onPhoto?: (file: File) => void | Promise<void>;
@@ -17,22 +23,58 @@ type DetectorCtor = new (opts: { formats: string[] }) => {
   detect: (source: ImageBitmapSource) => Promise<{ rawValue: string }[]>;
 };
 
-export default function CameraModal({ mode, title, initialHint, ocr = false, onClose, onScan, onPhoto }: Props) {
+const SCAN_COPY: Record<ScanKind, { title: string; hint: string; empty: string }> = {
+  serial: {
+    title: "Scan serial",
+    hint: "Point the camera at a barcode, QR code, or printed serial. If several values appear, choose one.",
+    empty: "No serial found. Move closer or type it.",
+  },
+  asset_tag: {
+    title: "Scan asset tag",
+    hint: "Point the camera at an asset-tag barcode or printed tag. If several values appear, choose one.",
+    empty: "No asset tag found. Move closer or type it.",
+  },
+  management_ip: {
+    title: "Scan management IP",
+    hint: "Frame the management IP address, then tap Read text. Barcodes are used only when they contain an IP. If several addresses appear, choose one.",
+    empty: "No IP address found. Move closer or type it.",
+  },
+  search: {
+    title: "Scan barcode, QR, or text",
+    hint: "Point the camera at a barcode, QR code, or printed serial. If several values appear, choose one.",
+    empty: "No barcode, QR, or readable text found. Move closer or type it.",
+  },
+};
+
+export default function CameraModal({
+  mode,
+  title,
+  initialHint,
+  ocr = false,
+  scanKind = "search",
+  onClose,
+  onScan,
+  onPhoto,
+}: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<number | null>(null);
+  const pausedRef = useRef(false);
+  const copy = SCAN_COPY[scanKind];
+  const useOcr = ocr || scanKind === "management_ip" || scanKind === "asset_tag";
   const [error, setError] = useState("");
   const [hint, setHint] = useState(
     initialHint ??
       (mode === "scan"
-        ? ocr
-          ? "Point the camera at a barcode, QR code, or printed serial"
-          : "Point the camera at the barcode or QR code"
+        ? useOcr
+          ? copy.hint
+          : "Point the camera at the barcode or QR code. If several codes appear, choose one."
         : "Frame the equipment, then capture"),
   );
   const [busy, setBusy] = useState(false);
   const [hasVideo, setHasVideo] = useState(false);
+  const [choices, setChoices] = useState<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,7 +99,7 @@ export default function CameraModal({ mode, title, initialHint, ocr = false, onC
       } catch (err) {
         setHasVideo(false);
         setError(err instanceof Error ? err.message : "Camera permission denied");
-        if (ocr && mode === "scan") {
+        if (useOcr && mode === "scan") {
           setHint("No camera in this browser. Use a photo of the barcode, QR code, or printed label.");
         }
       }
@@ -69,6 +111,7 @@ export default function CameraModal({ mode, title, initialHint, ocr = false, onC
   }, [mode]);
 
   function stop() {
+    pausedRef.current = false;
     if (timerRef.current) {
       window.clearInterval(timerRef.current);
       timerRef.current = null;
@@ -77,12 +120,25 @@ export default function CameraModal({ mode, title, initialHint, ocr = false, onC
     streamRef.current = null;
   }
 
+  function pauseLiveScan() {
+    pausedRef.current = true;
+  }
+
+  function keepScanning() {
+    pausedRef.current = false;
+    setChoices([]);
+    setError("");
+    setHint(initialHint ?? (useOcr ? copy.hint : "Point the camera at the barcode or QR code. If several codes appear, choose one."));
+  }
+
   function startScan() {
     const Detector = (window as unknown as { BarcodeDetector?: DetectorCtor }).BarcodeDetector;
     if (!Detector) {
       setHint(
-        ocr
-          ? "Live barcode detection is not available. Frame the label and tap Read text, or use a photo."
+        useOcr
+          ? scanKind === "management_ip"
+            ? "Live barcode detection is not available. Frame the IP address and tap Read text, or use a photo."
+            : "Live barcode detection is not available. Frame the label and tap Read text, or use a photo."
           : "Live barcode detection is not available in this browser. Keep this window open to line up the tag, then type the code.",
       );
       return;
@@ -94,7 +150,7 @@ export default function CameraModal({ mode, title, initialHint, ocr = false, onC
       });
     } catch {
       setHint(
-        ocr
+        useOcr
           ? "This browser cannot decode barcodes live. Frame the label and tap Read text, or use a photo."
           : "This browser opened the camera but cannot decode barcodes. Line up the tag, then type the code.",
       );
@@ -102,18 +158,47 @@ export default function CameraModal({ mode, title, initialHint, ocr = false, onC
     }
     timerRef.current = window.setInterval(async () => {
       const video = videoRef.current;
-      if (!video || video.readyState < 2) return;
+      if (pausedRef.current || !video || video.readyState < 2) return;
       try {
         const codes = await detector.detect(video);
-        if (codes[0]?.rawValue) {
-          stop();
-          onScan?.(codes[0].rawValue.trim());
-          onClose();
-        }
+        const values =
+          scanKind === "management_ip"
+            ? uniqueScanValues(codes.flatMap((code) => ipCandidatesFromText(code.rawValue || "")))
+            : uniqueScanValues(codes.map((code) => code.rawValue || ""));
+        if (!values.length) return;
+        offerCandidates(values);
       } catch {
         /* keep scanning */
       }
     }, 250);
+  }
+
+  function applyValue(value: string) {
+    const next = value.trim();
+    if (!next) {
+      setError(copy.empty);
+      return;
+    }
+    stop();
+    onScan?.(next);
+    onClose();
+  }
+
+  function offerCandidates(values: string[]) {
+    const unique = uniqueScanValues(values);
+    if (!unique.length) {
+      setError(copy.empty);
+      pausedRef.current = false;
+      return;
+    }
+    if (unique.length === 1) {
+      applyValue(unique[0]);
+      return;
+    }
+    pauseLiveScan();
+    setError("");
+    setChoices(unique);
+    setHint("Several values found. Choose one before the field is filled.");
   }
 
   async function captureStill() {
@@ -157,15 +242,9 @@ export default function CameraModal({ mode, title, initialHint, ocr = false, onC
     });
   }
 
-  async function finishScan(value: string) {
-    const next = value.trim();
-    if (!next) {
-      setError("No barcode, QR, or readable text found. Move closer or type it.");
-      return;
-    }
-    stop();
-    onScan?.(next);
-    onClose();
+  async function readCandidates(input: Blob) {
+    pauseLiveScan();
+    offerCandidates(await recognizeCandidates(input, scanKind));
   }
 
   async function readTextFromCamera() {
@@ -173,8 +252,9 @@ export default function CameraModal({ mode, title, initialHint, ocr = false, onC
     setError("");
     try {
       const blob = await frameBlob();
-      await finishScan(await recognizeLabel(blob));
+      await readCandidates(blob);
     } catch (err) {
+      pausedRef.current = false;
       setError(err instanceof Error ? err.message : "Could not read text");
     } finally {
       setBusy(false);
@@ -188,15 +268,16 @@ export default function CameraModal({ mode, title, initialHint, ocr = false, onC
     setBusy(true);
     setError("");
     try {
-      await finishScan(await recognizeLabel(file));
+      await readCandidates(file);
     } catch (err) {
+      pausedRef.current = false;
       setError(err instanceof Error ? err.message : "Could not read text");
     } finally {
       setBusy(false);
     }
   }
 
-  const scanTitle = ocr ? "Scan barcode, QR, or text" : "Scan barcode or QR";
+  const scanTitle = useOcr ? copy.title : "Scan barcode or QR";
 
   return (
     <div className="overlay" role="dialog" aria-modal="true">
@@ -211,6 +292,18 @@ export default function CameraModal({ mode, title, initialHint, ocr = false, onC
           <div className="reticle" />
         </div>
         <p className="muted">{hint}</p>
+        {choices.length > 0 && (
+          <div className="scan-choices" role="listbox" aria-label="Scan matches">
+            {choices.map((value) => (
+              <button key={value} type="button" className="btn" role="option" onClick={() => applyValue(value)}>
+                {value}
+              </button>
+            ))}
+            <button type="button" className="btn" onClick={keepScanning}>
+              Keep scanning
+            </button>
+          </div>
+        )}
         <p className="muted">Photos stay in DCEngineer. Nothing is written to the device gallery.</p>
         <div className="camera-actions">
           {mode === "photo" && (
@@ -218,7 +311,7 @@ export default function CameraModal({ mode, title, initialHint, ocr = false, onC
               {busy ? "Saving…" : "Capture"}
             </button>
           )}
-          {mode === "scan" && ocr && (
+          {mode === "scan" && useOcr && (
             <>
               <button type="button" className="btn primary block" disabled={busy || !hasVideo} onClick={readTextFromCamera}>
                 {busy ? "Reading text…" : "Read text"}

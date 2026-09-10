@@ -347,7 +347,7 @@ export function DeviceFields({
   catalogNonce = 0,
 }: Props) {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
-  const [cam, setCam] = useState<"scan" | "photo" | null>(null);
+  const [cam, setCam] = useState<"photo" | "serial" | "asset_tag" | "ip" | null>(null);
   const [ocrMsg, setOcrMsg] = useState("");
   const [ocrError, setOcrError] = useState("");
   const [ocrBusy, setOcrBusy] = useState(false);
@@ -532,26 +532,30 @@ export function DeviceFields({
       </div>
       <label className="field">
         <span>Serial</span>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div className="scan-field">
           <input
             value={value.serial}
             onChange={(e) => set({ serial: e.target.value })}
-            style={{ flex: 1 }}
             autoComplete="off"
           />
-          <button type="button" className="btn" onClick={() => setCam("scan")}>
+          <button type="button" className="btn" onClick={() => setCam("serial")}>
             Scan
           </button>
         </div>
       </label>
-      <div className="row three">
+      <label className="field">
+        <span>Asset tag</span>
+        <div className="scan-field">
+          <input value={value.asset_tag} onChange={(e) => set({ asset_tag: e.target.value })} autoComplete="off" />
+          <button type="button" className="btn" onClick={() => setCam("asset_tag")}>
+            Scan
+          </button>
+        </div>
+      </label>
+      <div className="row">
         <label className="field">
           <span>Hostname</span>
           <input value={value.hostname} onChange={(e) => set({ hostname: e.target.value })} autoComplete="off" />
-        </label>
-        <label className="field">
-          <span>Asset tag</span>
-          <input value={value.asset_tag} onChange={(e) => set({ asset_tag: e.target.value })} autoComplete="off" />
         </label>
         <label className="field">
           <span>Owner</span>
@@ -696,7 +700,12 @@ export function DeviceFields({
       </label>
       <label className="field">
         <span>Management IP</span>
-        <input value={value.management_ip} onChange={(e) => set({ management_ip: e.target.value })} />
+        <div className="scan-field">
+          <input value={value.management_ip} onChange={(e) => set({ management_ip: e.target.value })} autoComplete="off" />
+          <button type="button" className="btn" onClick={() => setCam("ip")}>
+            Scan
+          </button>
+        </div>
       </label>
       <div className="row">
         <label className="field">
@@ -919,9 +928,15 @@ export function DeviceFields({
 
       {cam && (
         <CameraModal
-          mode={cam}
+          mode={cam === "photo" ? "photo" : "scan"}
+          scanKind={cam === "ip" ? "management_ip" : cam === "photo" ? undefined : cam}
+          ocr={cam !== "photo"}
           onClose={() => setCam(null)}
-          onScan={(serial) => set({ serial })}
+          onScan={(value) => {
+            if (cam === "serial") set({ serial: value });
+            else if (cam === "asset_tag") set({ asset_tag: value });
+            else if (cam === "ip") set({ management_ip: value });
+          }}
           onPhoto={async (file) => {
             await onPendingPhotos?.([...(pendingPhotos || []), file]);
           }}

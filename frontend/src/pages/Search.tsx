@@ -137,9 +137,10 @@ export default function Search() {
       {scanning && (
         <CameraModal
           mode="scan"
+          scanKind="search"
           ocr
           title="Scan barcode, QR, or text"
-          initialHint="Point the camera at a barcode, QR code, or printed serial. Use Read text for labels."
+          initialHint="Point the camera at a barcode, QR code, or printed serial. If several values appear, choose one."
           onClose={() => setScanning(false)}
           onScan={onScan}
         />
