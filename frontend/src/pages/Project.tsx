@@ -368,22 +368,26 @@ export default function Project() {
       </div>
       {error && <div className="error">{error}</div>}
       {importMsg && <div className="success">{importMsg}</div>}
-      <p className="tabs-label">Layout</p>
-      <div className="tabs">
+      <p className="tabs-label layout">Layout</p>
+      <div className="tabs layout-tabs">
         {LAYOUT_TABS.map((t) => (
           <button key={t} className={`tab ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>
             {TAB_LABELS[t]}
           </button>
         ))}
       </div>
-      <p className="tabs-label">Project</p>
-      <div className="tabs">
-        {OTHER_TABS.map((t) => (
-          <button key={t} className={`tab ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>
-            {TAB_LABELS[t]}
-          </button>
-        ))}
-      </div>
+      {!LAYOUT_TABS.includes(tab) && (
+        <>
+          <p className="tabs-label">Project</p>
+          <div className="tabs">
+            {OTHER_TABS.map((t) => (
+              <button key={t} className={`tab ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>
+                {TAB_LABELS[t]}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       {tab === "overview" && (
         <>

@@ -280,8 +280,17 @@ p { margin: 0 0 0.75rem; color: var(--muted); }
 .field-confirm.confirmed input { outline: 1px solid var(--ok-fg); }
 .field-confirm.skipped input { opacity: 0.6; }
 .ai-parse { margin-top: 8px; }
+.tabs {
+  display: flex; flex-wrap: wrap; gap: 8px;
+}
 .tabs-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 6px; }
+.tabs-label.layout { font-size: 0.85rem; font-weight: 700; color: var(--text); }
 .tabs-label + .tabs { margin-bottom: 10px; }
+.tabs.layout-tabs .tab {
+  font-size: 1.08rem;
+  font-weight: 700;
+  padding: 10px 16px;
+}
 .layout-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
 @media (max-width: 700px) { .layout-stats { grid-template-columns: 1fr 1fr; } }
 .layout-stat {
