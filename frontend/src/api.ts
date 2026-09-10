@@ -283,16 +283,39 @@ export const ops = {
   me: () => api<User>("/api/auth/me"),
 };
 
+export function safeDownloadFilename(name: string, fallback = "download") {
+  const cleaned = (name || "")
+    .replace(/[<>:"/\\|?*\x00-\x1f]+/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^\.+/, "");
+  return (cleaned || fallback).slice(0, 120);
+}
+
 export async function downloadAuth(url: string, filename: string) {
-  const session = getSession();
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${session?.access_token}` } });
-  if (!res.ok) throw new Error("Download failed");
+  const res = await authFetch(url);
+  if (!res.ok) {
+    let detail = res.statusText || "Download failed";
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body?.detail) detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
   const blob = await res.blob();
+  if (!blob.size) throw new Error("Download was empty");
+  const objectUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
+  a.href = objectUrl;
+  a.download = safeDownloadFilename(filename);
+  a.rel = "noopener";
+  a.style.display = "none";
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(a.href);
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
 }
 
 export type Attachment = {

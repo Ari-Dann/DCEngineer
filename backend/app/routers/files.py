@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
+import logging
 
 from app.backup import run_backup
 from app.config import get_settings
@@ -28,6 +29,7 @@ from app.storage import get_storage
 
 files_router = APIRouter(prefix="/api", tags=["files"])
 meta_router = APIRouter(prefix="/api", tags=["meta"])
+log = logging.getLogger("dcengineer")
 
 
 @files_router.post("/attachments", response_model=AttachmentOut, status_code=201)
@@ -120,7 +122,11 @@ def export_visio_office(project_id: int, db: Session = Depends(get_db), _: User 
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
-    data = build_office_zip(db, project)
+    try:
+        data = build_office_zip(db, project)
+    except Exception as exc:
+        log.exception("Visio/Office export failed for project %s", project_id)
+        raise HTTPException(500, f"Could not build Visio/Office export: {exc}") from exc
     stem = (project.site_name or project.customer or project.name or "DCEngineer").replace(" ", "_")
     filename = f"{stem}-Visio-Office.zip"
     return Response(

@@ -82,6 +82,7 @@ export default function Project() {
   const [lists, setLists] = useState<Checklist[]>([]);
   const [hands, setHands] = useState<Handoff[]>([]);
   const [error, setError] = useState("");
+  const [exporting, setExporting] = useState<"rbi" | "visio" | "netbox" | "">("");
   const [areaName, setAreaName] = useState("");
   const [rowName, setRowName] = useState("");
   const [rowAreaId, setRowAreaId] = useState<number | "">("");
@@ -205,6 +206,18 @@ export default function Project() {
   function changeSelectMode(next: SelectMode) {
     setSelectMode(next);
     setSelected((ids) => (next === "one" ? ids.slice(0, 1) : ids));
+  }
+
+  async function downloadExport(kind: "rbi" | "visio" | "netbox", url: string, filename: string) {
+    setError("");
+    setExporting(kind);
+    try {
+      await downloadAuth(url, filename);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Download failed");
+    } finally {
+      setExporting("");
+    }
   }
 
   async function persistRowRestriction(row: AisleRow, type: RestrictionType) {
@@ -349,20 +362,26 @@ export default function Project() {
               </button>
             </>
           )}
-          <button className="btn primary" onClick={() => downloadAuth(projects.exportUrl(pid), `RBI-${project.name}.xlsx`)}>
-            Export RBI workbook
+          <button
+            className="btn primary"
+            disabled={Boolean(exporting)}
+            onClick={() => downloadExport("rbi", projects.exportUrl(pid), `RBI-${project.name}.xlsx`)}
+          >
+            {exporting === "rbi" ? "Exporting…" : "Export RBI workbook"}
           </button>
           <button
             className="btn"
-            onClick={() => downloadAuth(projects.exportVisioUrl(pid), `${project.name}-Visio-Office.zip`)}
+            disabled={Boolean(exporting)}
+            onClick={() => downloadExport("visio", projects.exportVisioUrl(pid), `${project.name}-Visio-Office.zip`)}
           >
-            Export for Visio / Office
+            {exporting === "visio" ? "Exporting…" : "Export for Visio / Office"}
           </button>
           <button
             className="btn"
-            onClick={() => downloadAuth(projects.exportNetboxUrl(pid), `${project.name}-NetBox.zip`)}
+            disabled={Boolean(exporting)}
+            onClick={() => downloadExport("netbox", projects.exportNetboxUrl(pid), `${project.name}-NetBox.zip`)}
           >
-            Export for NetBox
+            {exporting === "netbox" ? "Exporting…" : "Export for NetBox"}
           </button>
         </div>
       </div>

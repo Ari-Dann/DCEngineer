@@ -1743,6 +1743,75 @@ def test_visio_office_export_preserves_hierarchy_and_pictures(client, auth):
     assert any(r[1] == "spare-sw" for r in rows)
     assert unlocated["id"]
 
+    import xml.etree.ElementTree as ET
+
+    for name in vsdx_names:
+        if name.endswith(".xml") or name.endswith(".rels"):
+            ET.fromstring(vsdx.read(name))
+    page_xml = b"".join(vsdx.read(n) for n in vsdx_names if n.startswith("visio/pages/page") and n.endswith(".xml"))
+    assert b'F="Width*1"' in page_xml
+    assert b"F=&quot;" not in page_xml
+    assert b'CompressionType="JPEG"' in page_xml
+
+
+def test_visio_office_export_includes_row_photos_and_survives_control_chars(client, auth):
+    from io import BytesIO
+    from zipfile import ZipFile
+    import xml.etree.ElementTree as ET
+
+    project = client.post(
+        "/api/projects",
+        headers=auth,
+        json={"name": "Visio Edge", "customer": "Acme", "site_name": "Hall:West"},
+    ).json()
+    pid = project["id"]
+    area = client.post(f"/api/projects/{pid}/areas", headers=auth, json={"name": "Hall/A"}).json()
+    row = client.post(f"/api/projects/{pid}/rows", headers=auth, json={"name": "A12", "area_id": area["id"]}).json()
+    rack = client.post(
+        f"/api/projects/{pid}/racks",
+        headers=auth,
+        json={"name": "09", "area_id": area["id"], "row_id": row["id"], "ru_height": 42},
+    ).json()
+    client.post(
+        f"/api/projects/{pid}/devices",
+        headers=auth,
+        json={"name": "fw\x01edge", "rack_id": rack["id"], "serial": "SN\x00X", "notes": "ok\x08"},
+    )
+    row_photo = client.post(
+        "/api/attachments",
+        headers=auth,
+        data={"entity_type": "row", "entity_id": str(row["id"])},
+        files={"file": ("aisle.jpg", BytesIO(b"\xff\xd8row"), "image/jpeg")},
+    )
+    assert row_photo.status_code == 201, row_photo.text
+
+    exported = client.get(f"/api/projects/{pid}/export-visio.zip", headers=auth)
+    assert exported.status_code == 200, exported.text
+    zf = ZipFile(BytesIO(exported.content))
+    names = zf.namelist()
+    assert any("/_row/" in n and n.endswith(".jpg") for n in names)
+    vsdx_name = next(n for n in names if n.endswith(".vsdx"))
+    vsdx = ZipFile(BytesIO(zf.read(vsdx_name)))
+    pages_root = ET.fromstring(vsdx.read("visio/pages/pages.xml"))
+    for page in pages_root:
+        name = page.get("Name") or ""
+        assert "/" not in name
+        assert ":" not in name
+    for name in vsdx.namelist():
+        if name.endswith(".xml") or name.endswith(".rels"):
+            ET.fromstring(vsdx.read(name))
+    xlsx_name = next(n for n in names if n.endswith(".xlsx") and "Data Visualizer" in n)
+    from openpyxl import load_workbook
+
+    wb = load_workbook(BytesIO(zf.read(xlsx_name)))
+    vis = wb["VisioHierarchy"]
+    rows = list(vis.iter_rows(min_row=2, values_only=True))
+    row_row = next(r for r in rows if r[2] == "Row")
+    assert "_row" in (row_row[12] or "")
+    device_row = next(r for r in rows if r[2] == "Device")
+    assert "\x01" not in (device_row[1] or "")
+    assert "\x00" not in (device_row[8] or "")
+
 
 def test_bulk_create_rows_under_area(client, auth):
     project = client.post(

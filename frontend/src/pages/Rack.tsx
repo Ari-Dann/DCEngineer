@@ -137,7 +137,11 @@ export default function RackPage() {
         </div>
         <button
           className="btn"
-          onClick={() => downloadAuth(`/api/projects/${pid}/racks/${rid}/elevation.svg`, `${elev.rack.name}.svg`)}
+          onClick={() =>
+            downloadAuth(`/api/projects/${pid}/racks/${rid}/elevation.svg`, `${elev.rack.name}.svg`).catch((e) =>
+              setError(e instanceof Error ? e.message : "Download failed"),
+            )
+          }
         >
           Download SVG layout
         </button>

@@ -76,8 +76,24 @@ def _unique(name: str, used: set[str], limit: int = 48) -> str:
     return candidate
 
 
+def _page_title(name: str) -> str:
+    text = re.sub(r'[:\\/?*\[\]]+', " ", name or "")
+    text = re.sub(r"\s+", " ", text).strip() or "Page"
+    return text[:31]
+
+
 def _xml(text: str) -> str:
     return escape(text or "", {'"': "&quot;", "'": "&apos;"})
+
+
+def _sheet_text(value: str) -> str:
+    from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+
+    return ILLEGAL_CHARACTERS_RE.sub("", value or "")
+
+
+def _compression_for_ext(ext: str) -> str:
+    return {"png": "PNG", "gif": "GIF", "bmp": "BMP"}.get((ext or "").lstrip(".").lower(), "JPEG")
 
 
 @dataclass
@@ -136,6 +152,13 @@ def _folder_for(layout: Layout, entity_type: str, entity_id: int) -> str:
     if entity_type == "area":
         area = layout.area_by_id.get(entity_id)
         return f"Pictures/{_safe(area.name if area else f'area-{entity_id}')}/_area"
+    if entity_type == "row":
+        row = layout.row_by_id.get(entity_id)
+        if not row:
+            return f"Pictures/_rows/{entity_id}"
+        area = layout.area_by_id.get(row.area_id) if row.area_id else None
+        parts = ["Pictures", _safe(area.name) if area else "_unassigned", _safe(row.name), "_row"]
+        return "/".join(parts)
     if entity_type == "rack":
         rack = layout.rack_by_id.get(entity_id)
         if not rack:
@@ -185,6 +208,7 @@ def collect_layout(db: Session, project: Project) -> Layout:
     entity_ids: dict[str, list[int]] = {
         "project": [project.id],
         "area": [a.id for a in areas],
+        "row": [r.id for r in rows],
         "rack": [r.id for r in racks],
         "device": [d.id for d in devices],
     }
@@ -281,6 +305,7 @@ def collect_layout(db: Session, project: Project) -> Layout:
         )
     for row in rows:
         area = layout.area_by_id.get(row.area_id) if row.area_id else None
+        pics = layout.pictures_by_key.get(("row", row.id), [])
         nodes.append(
             Node(
                 visio_id=f"ROW-{row.id}",
@@ -296,10 +321,11 @@ def collect_layout(db: Session, project: Project) -> Layout:
                     "Owner": "",
                     "Vendor": "",
                     "Model": "",
-                    "Picture": "",
+                    "Picture": "; ".join(p.zip_path for p in pics),
                     "Notes": row.notes
                     or (f"{row.restriction_type} — no photos" if row.restricted or not row.photography_allowed else ""),
                 },
+                pictures=pics,
             )
         )
     for rack in racks:
@@ -463,20 +489,20 @@ def build_visualizer_workbook(layout: Layout) -> bytes:
     for node in layout.nodes:
         vis.append(
             [
-                node.visio_id,
-                node.name,
-                node.title,
-                node.manager_id,
-                node.extra.get("Area", ""),
-                node.extra.get("Row", ""),
-                node.extra.get("Rack", ""),
-                node.extra.get("RU", ""),
-                node.extra.get("Serial", ""),
-                node.extra.get("Owner", ""),
-                node.extra.get("Vendor", ""),
-                node.extra.get("Model", ""),
-                node.extra.get("Picture", ""),
-                node.extra.get("Notes", ""),
+                _sheet_text(node.visio_id),
+                _sheet_text(node.name),
+                _sheet_text(node.title),
+                _sheet_text(node.manager_id),
+                _sheet_text(node.extra.get("Area", "")),
+                _sheet_text(node.extra.get("Row", "")),
+                _sheet_text(node.extra.get("Rack", "")),
+                _sheet_text(node.extra.get("RU", "")),
+                _sheet_text(node.extra.get("Serial", "")),
+                _sheet_text(node.extra.get("Owner", "")),
+                _sheet_text(node.extra.get("Vendor", "")),
+                _sheet_text(node.extra.get("Model", "")),
+                _sheet_text(node.extra.get("Picture", "")),
+                _sheet_text(node.extra.get("Notes", "")),
             ]
         )
     last = vis.max_row
@@ -492,7 +518,7 @@ def build_visualizer_workbook(layout: Layout) -> bytes:
     for pic in layout.pictures:
         path = pic.zip_path
         kind = pic.entity_type
-        pics.append([pic.label, kind, pic.filename, path])
+        pics.append([_sheet_text(pic.label), kind, _sheet_text(pic.filename), path])
         cell = pics.cell(pics.max_row, 4)
         cell.hyperlink = path
         cell.style = "Hyperlink"
@@ -590,13 +616,24 @@ def _shape_xml(
     </Shape>"""
 
 
-def _foreign_image_shape(shape_id: int, rel_id: str, pin_x: float, pin_y: float, width: float, height: float, caption: str) -> str:
+def _foreign_image_shape(
+    shape_id: int,
+    rel_id: str,
+    pin_x: float,
+    pin_y: float,
+    width: float,
+    height: float,
+    caption: str,
+    ext: str = ".jpg",
+) -> str:
     extra_cells = (
-        f'{_cell("ImgOffsetX", "0")}{_cell("ImgOffsetY", "0")}'
-        f'{_cell("ImgWidth", f"{width:.4f}", " F=&quot;Width*1&quot;")}{_cell("ImgHeight", f"{height:.4f}", " F=&quot;Height*1&quot;")}'
+        _cell("ImgOffsetX", "0")
+        + _cell("ImgOffsetY", "0")
+        + _cell("ImgWidth", f"{width:.4f}", ' F="Width*1"')
+        + _cell("ImgHeight", f"{height:.4f}", ' F="Height*1"')
     )
     extra_body = f"""
-      <ForeignData ForeignType="Bitmap">
+      <ForeignData ForeignType="Bitmap" CompressionType="{_compression_for_ext(ext)}">
         <Rel r:id="{rel_id}"/>
       </ForeignData>"""
     return _shape_xml(
@@ -634,12 +671,14 @@ class VsdxBuilder:
         self._used_names: set[str] = set()
         self._image_n = 0
 
-    def add_page(self, name: str, width: float = 17.0, height: float = 11.0) -> VsdxPage:
+    def add_page(self, name: str, width: float = 17.0, height: float = 11.0, *, unique: bool = True) -> VsdxPage:
         page_id = len(self.pages)
         filename = f"page{page_id + 1}.xml"
+        page_name = _unique(_page_title(name), self._used_names, limit=31) if unique else name
+        self._used_names.add(page_name.lower())
         page = VsdxPage(
             page_id=page_id,
-            name=_unique(name, self._used_names),
+            name=page_name,
             filename=filename,
             rel_id=f"rId{page_id + 1}",
             width=width,
@@ -648,14 +687,16 @@ class VsdxBuilder:
         self.pages.append(page)
         return page
 
-    def add_image(self, page: VsdxPage, data: bytes, content_type: str) -> str:
+    def add_image(self, page: VsdxPage, data: bytes, content_type: str) -> tuple[str, str]:
         self._image_n += 1
         ext = IMAGE_EXTS.get((content_type or "").lower(), ".jpg")
-        if ext == ".webp":
+        if ext not in {".jpg", ".jpeg", ".png", ".gif", ".bmp"}:
+            ext = ".jpg"
+        if ext == ".jpeg":
             ext = ".jpg"
         rel_id = f"rIdImg{self._image_n}"
         page.images.append((rel_id, data, ext))
-        return rel_id
+        return rel_id, ext
 
     def dumps(self) -> bytes:
         buf = BytesIO()
@@ -864,9 +905,10 @@ def build_vsdx(layout: Layout) -> bytes:
         )
     )
     sid += 1
+    reserved = set(builder._used_names)
     area_pages: dict[int, str] = {}
     for area in layout.areas:
-        area_pages[area.id] = f"Area {area.name}"[:48]
+        area_pages[area.id] = _unique(_page_title(f"Area {area.name}"), reserved, limit=31)
     positions = _grid_positions(len(layout.areas), 17, 11, 3.6, 1.4, 9.4)
     for area, (x, y) in zip(layout.areas, positions):
         row_count = sum(1 for r in layout.rows if r.area_id == area.id)
@@ -891,11 +933,18 @@ def build_vsdx(layout: Layout) -> bytes:
         for pic in layout.pictures_by_key.get(("area", area.id), [])[:1]:
             if (pic.content_type or "").lower() not in VSDX_IMAGE_TYPES:
                 continue
-            rel = builder.add_image(overview, pic.data, pic.content_type)
-            overview.shapes.append(_foreign_image_shape(sid, rel, x, y - 1.3, 1.6, 1.1, ""))
+            rel, ext = builder.add_image(overview, pic.data, pic.content_type)
+            overview.shapes.append(_foreign_image_shape(sid, rel, x, y - 1.3, 1.6, 1.1, "", ext))
             sid += 1
 
+    rack_page_names: dict[int, str] = {}
+    for rack in layout.racks:
+        row = layout.row_by_id.get(rack.row_id) if rack.row_id else None
+        label = f"Rack {row.name}-{rack.name}" if row else f"Rack {rack.name}"
+        rack_page_names[rack.id] = _unique(_page_title(label), reserved, limit=31)
+
     unlocated = layout.devices_by_rack.get(None, [])
+    unlocated_page = _unique(_page_title("Unlocated"), reserved, limit=31) if unlocated else ""
     if unlocated:
         overview.shapes.append(
             _shape_xml(
@@ -906,22 +955,13 @@ def build_vsdx(layout: Layout) -> bytes:
                 height=0.8,
                 text=f"Unlocated devices ({len(unlocated)})",
                 fill=KIND_FILL["Unlocated"],
-                hyperlink_page="Unlocated",
+                hyperlink_page=unlocated_page,
             )
         )
         sid += 1
 
-    rack_page_names: dict[int, str] = {}
-    used_rack_pages: set[str] = set()
-    for rack in layout.racks:
-        row = layout.row_by_id.get(rack.row_id) if rack.row_id else None
-        label = f"Rack {rack.name}"
-        if row:
-            label = f"Rack {row.name}-{rack.name}"
-        rack_page_names[rack.id] = _unique(label, used_rack_pages)
-
     for area in layout.areas:
-        page = builder.add_page(area_pages[area.id])
+        page = builder.add_page(area_pages[area.id], unique=False)
         page.shapes.append(
             _shape_xml(
                 sid,
@@ -987,7 +1027,7 @@ def build_vsdx(layout: Layout) -> bytes:
                 break
 
     for rack in layout.racks:
-        page = builder.add_page(rack_page_names[rack.id], width=11.0, height=17.0)
+        page = builder.add_page(rack_page_names[rack.id], width=11.0, height=17.0, unique=False)
         row = layout.row_by_id.get(rack.row_id) if rack.row_id else None
         area = layout.area_by_id.get(rack.area_id) if rack.area_id else None
         if not area and row and row.area_id:
@@ -1080,8 +1120,8 @@ def build_vsdx(layout: Layout) -> bytes:
         for caption, pic in photos[:8]:
             if (pic.content_type or "").lower() not in VSDX_IMAGE_TYPES:
                 continue
-            rel = builder.add_image(page, pic.data, pic.content_type)
-            page.shapes.append(_foreign_image_shape(sid, rel, photo_x, photo_y, 2.4, 1.7, caption[:40]))
+            rel, ext = builder.add_image(page, pic.data, pic.content_type)
+            page.shapes.append(_foreign_image_shape(sid, rel, photo_x, photo_y, 2.4, 1.7, caption[:40], ext))
             sid += 1
             photo_y -= 2.05
             if photo_y < 1.2:
@@ -1089,7 +1129,7 @@ def build_vsdx(layout: Layout) -> bytes:
                 photo_y = 15.2
 
     if unlocated:
-        page = builder.add_page("Unlocated")
+        page = builder.add_page(unlocated_page, unique=False)
         page.shapes.append(
             _shape_xml(
                 sid,
