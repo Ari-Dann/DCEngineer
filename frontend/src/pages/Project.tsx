@@ -82,6 +82,7 @@ export default function Project() {
   const [lists, setLists] = useState<Checklist[]>([]);
   const [hands, setHands] = useState<Handoff[]>([]);
   const [error, setError] = useState("");
+  const [exporting, setExporting] = useState<"rbi" | "visio" | "netbox" | "">("");
   const [areaName, setAreaName] = useState("");
   const [rowName, setRowName] = useState("");
   const [rowAreaId, setRowAreaId] = useState<number | "">("");
@@ -205,6 +206,18 @@ export default function Project() {
   function changeSelectMode(next: SelectMode) {
     setSelectMode(next);
     setSelected((ids) => (next === "one" ? ids.slice(0, 1) : ids));
+  }
+
+  async function downloadExport(kind: "rbi" | "visio" | "netbox", url: string, filename: string) {
+    setError("");
+    setExporting(kind);
+    try {
+      await downloadAuth(url, filename);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Download failed");
+    } finally {
+      setExporting("");
+    }
   }
 
   async function persistRowRestriction(row: AisleRow, type: RestrictionType) {
@@ -349,41 +362,51 @@ export default function Project() {
               </button>
             </>
           )}
-          <button className="btn primary" onClick={() => downloadAuth(projects.exportUrl(pid), `RBI-${project.name}.xlsx`)}>
-            Export RBI workbook
+          <button
+            className="btn primary"
+            disabled={Boolean(exporting)}
+            onClick={() => downloadExport("rbi", projects.exportUrl(pid), `RBI-${project.name}.xlsx`)}
+          >
+            {exporting === "rbi" ? "Exporting…" : "Export RBI workbook"}
           </button>
           <button
             className="btn"
-            onClick={() => downloadAuth(projects.exportVisioUrl(pid), `${project.name}-Visio-Office.zip`)}
+            disabled={Boolean(exporting)}
+            onClick={() => downloadExport("visio", projects.exportVisioUrl(pid), `${project.name}-Visio-Office.zip`)}
           >
-            Export for Visio / Office
+            {exporting === "visio" ? "Exporting…" : "Export for Visio / Office"}
           </button>
           <button
             className="btn"
-            onClick={() => downloadAuth(projects.exportNetboxUrl(pid), `${project.name}-NetBox.zip`)}
+            disabled={Boolean(exporting)}
+            onClick={() => downloadExport("netbox", projects.exportNetboxUrl(pid), `${project.name}-NetBox.zip`)}
           >
-            Export for NetBox
+            {exporting === "netbox" ? "Exporting…" : "Export for NetBox"}
           </button>
         </div>
       </div>
       {error && <div className="error">{error}</div>}
       {importMsg && <div className="success">{importMsg}</div>}
-      <p className="tabs-label">Layout</p>
-      <div className="tabs">
+      <p className="tabs-label layout">Layout</p>
+      <div className="tabs layout-tabs">
         {LAYOUT_TABS.map((t) => (
           <button key={t} className={`tab ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>
             {TAB_LABELS[t]}
           </button>
         ))}
       </div>
-      <p className="tabs-label">Project</p>
-      <div className="tabs">
-        {OTHER_TABS.map((t) => (
-          <button key={t} className={`tab ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>
-            {TAB_LABELS[t]}
-          </button>
-        ))}
-      </div>
+      {!LAYOUT_TABS.includes(tab) && (
+        <>
+          <p className="tabs-label">Project</p>
+          <div className="tabs">
+            {OTHER_TABS.map((t) => (
+              <button key={t} className={`tab ${tab === t ? "on" : ""}`} onClick={() => setTab(t)}>
+                {TAB_LABELS[t]}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       {tab === "overview" && (
         <>
@@ -705,15 +728,6 @@ export default function Project() {
                   >
                     <strong>{r.name}</strong>
                   </button>
-                  <SavedRestrictionPicker
-                    name={`row-restriction-${r.id}`}
-                    entity={r}
-                    scope="row"
-                    compact
-                    inline
-                    inherited={inheritedPhotoBlockers({ project })}
-                    onPersist={(type) => persistRowRestriction(r, type)}
-                  />
                   <button
                     type="button"
                     className="list-meta muted"
@@ -724,9 +738,20 @@ export default function Project() {
                   </button>
                 </div>
               </div>
-              <button type="button" className="btn" onClick={() => setOpenRow(openRow === r.id ? null : r.id)}>
-                Photos
-              </button>
+              <div className="list-actions">
+                <SavedRestrictionPicker
+                  name={`row-restriction-${r.id}`}
+                  entity={r}
+                  scope="row"
+                  compact
+                  inline
+                  inherited={inheritedPhotoBlockers({ project })}
+                  onPersist={(type) => persistRowRestriction(r, type)}
+                />
+                <button type="button" className="btn" onClick={() => setOpenRow(openRow === r.id ? null : r.id)}>
+                  Photos
+                </button>
+              </div>
             </div>
             {editingRow?.id === r.id && (
               <form
@@ -889,15 +914,6 @@ export default function Project() {
                   >
                     <strong>{r.name}</strong>
                   </Link>
-                  <SavedRestrictionPicker
-                    name={`rack-restriction-${r.id}`}
-                    entity={r}
-                    scope="rack"
-                    compact
-                    inline
-                    inherited={inheritedPhotoBlockers({ project, row: parentRow })}
-                    onPersist={(type) => persistRackRestriction(r, type)}
-                  />
                   <Link
                     className="list-meta muted"
                     to={rackHref(pid, r.id, { area: r.area_id || areaFilter, row: r.row_id || rowFilter })}
@@ -907,6 +923,17 @@ export default function Project() {
                     {restrictionCaption(r)}
                   </Link>
                 </div>
+              </div>
+              <div className="list-actions">
+                <SavedRestrictionPicker
+                  name={`rack-restriction-${r.id}`}
+                  entity={r}
+                  scope="rack"
+                  compact
+                  inline
+                  inherited={inheritedPhotoBlockers({ project, row: parentRow })}
+                  onPersist={(type) => persistRackRestriction(r, type)}
+                />
               </div>
             </div>
             {editingRack?.id === r.id && (

@@ -13,6 +13,7 @@ import Ops from "./pages/Ops";
 import Search from "./pages/Search";
 import Settings from "./pages/Settings";
 import ErrorBoundary from "./components/ErrorBoundary";
+import ThemeToggle from "./components/ThemeToggle";
 
 const SIDEBAR_KEY = "dce-sidebar";
 const DESKTOP_NAV = "(min-width: 900px)";
@@ -204,6 +205,7 @@ function Layout({ children }: { children: ReactNode }) {
             <span className="brand-text">DCEngineer</span>
           </div>
           <TopSearch />
+          <ThemeToggle />
           <span className="muted topbar-user">{session?.username}</span>
         </header>
         <ErrorBoundary>{children}</ErrorBoundary>

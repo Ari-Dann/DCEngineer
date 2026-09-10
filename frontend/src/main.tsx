@@ -2,7 +2,10 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
+import { applyTheme, readTheme } from "./theme";
 import "./styles.css";
+
+applyTheme(readTheme());
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
