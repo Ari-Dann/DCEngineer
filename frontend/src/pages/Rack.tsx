@@ -199,7 +199,7 @@ export default function RackPage() {
             })}
           </div>
         </div>
-        <div>
+        <div className="rack-side">
           <form className="card" onSubmit={saveRack}>
             <h3>Edit rack</h3>
             <RackHeightField value={height} onChange={setHeight} />
