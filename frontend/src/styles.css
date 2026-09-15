@@ -217,12 +217,22 @@ p { margin: 0 0 0.75rem; color: var(--muted); }
 .grid { display: grid; gap: 12px; }
 .grid.stats { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 .grid.two { grid-template-columns: 1fr; }
+.rack-page {
+  --rack-elev-offset: calc(var(--nav-h) + var(--safe-t) + var(--safe-b) + 13.75rem);
+}
+.rack-elevation-col { min-width: 0; }
 @media (min-width: 900px) {
   .grid.two { grid-template-columns: 1.2fr 0.8fr; }
   .app-shell { padding-bottom: 24px; }
   .nav { display: none; }
   .sidebar-backdrop { display: none; }
   .app-shell.with-sidebar { margin-left: 220px; }
+  .rack-page { --rack-elev-offset: calc(var(--safe-t) + 11.25rem); }
+  .rack-elevation-col {
+    position: sticky;
+    top: calc(var(--safe-t) + 4.5rem);
+    align-self: start;
+  }
 }
 
 .card {
@@ -340,16 +350,25 @@ tr:hover td { background: var(--bg-hover); }
 .login h1 { font-size: 1.6rem; }
 
 .elevation {
-  display: grid; gap: 1px; background: var(--border);
+  display: flex; flex-direction: column; gap: 1px; background: var(--border);
   border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
-  max-height: 72vh; overflow-y: auto;
+  height: calc(100dvh - var(--rack-elev-offset, 14rem));
+  min-height: 16rem;
 }
 .ru {
-  display: grid; grid-template-columns: 42px 1fr; min-height: 22px;
+  display: grid; grid-template-columns: 2.25rem 1fr; flex: 1 1 0; min-height: 0;
   background: var(--bg-elev);
 }
-.ru .u { display: grid; place-items: center; color: var(--muted); font-size: 0.7rem; background: var(--nav-bg); }
-.ru .slot { padding: 2px 8px; font-size: 0.78rem; display: flex; align-items: center; gap: 8px; border: 0; width: 100%; text-align: left; min-height: 22px; cursor: pointer; background: transparent; color: inherit; }
+.ru .u {
+  display: grid; place-items: center; color: var(--muted); background: var(--nav-bg);
+  font-size: clamp(0.5rem, 1.05vh, 0.7rem); line-height: 1;
+}
+.ru .slot {
+  padding: 0 8px; font-size: clamp(0.55rem, 1.2vh, 0.78rem);
+  display: flex; align-items: center; gap: 8px; border: 0; width: 100%; height: 100%;
+  text-align: left; min-height: 0; cursor: pointer; background: transparent; color: inherit;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
 .ru .slot.empty { color: var(--empty); }
 .ru .slot.empty:hover, .ru .slot.empty.picked { color: var(--accent); background: var(--bg-hover); }
 .dev-server { background: color-mix(in srgb, var(--accent) 35%, var(--bg-elev)); }

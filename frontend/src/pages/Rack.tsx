@@ -116,7 +116,7 @@ export default function RackPage() {
   const rackPhotosOk = photosAllowed({ project, row: parentRow, rack: elev.rack });
 
   return (
-    <div className="page">
+    <div className="page rack-page">
       <nav className="crumb">
         <Link to="/projects">Projects</Link>
         <span className="muted">/</span>
@@ -162,19 +162,26 @@ export default function RackPage() {
         </button>
       </div>
       {error && <div className="error">{error}</div>}
-      <div className="grid two">
-        <div>
-          <div className="elevation">
+      <div className="grid two rack-layout">
+        <div className="rack-elevation-col">
+          <div className="elevation" role="list" aria-label={`${elev.rack.ru_height}U rack elevation`}>
             {elev.slots.map((s) => {
               const dev = s.device_id ? byId.get(s.device_id) : undefined;
               const top = dev && (dev.ru_end || dev.ru_start) === s.u;
               const inside = dev ? elev.devices.filter((d) => d.parent_device_id === dev.id).length : 0;
+              const label = top
+                ? `${dev?.name} · ${dev?.vendor} ${dev?.model}${inside ? ` · ${inside} inside` : ""}`
+                : dev
+                  ? ""
+                  : "empty — click to add";
               return (
-                <div className="ru" key={s.u}>
+                <div className="ru" key={s.u} role="listitem">
                   <div className="u">{s.u}</div>
                   <button
                     type="button"
                     className={`slot ${dev ? deviceTypeClass(dev.device_type) : "empty"}${!dev && adding?.ru_start === s.u ? " picked" : ""}`}
+                    title={label || undefined}
+                    aria-label={label ? `U${s.u} ${label}` : `U${s.u} empty`}
                     onClick={() => {
                       if (dev) {
                         setAdding(null);
@@ -185,11 +192,7 @@ export default function RackPage() {
                       }
                     }}
                   >
-                    {top
-                      ? `${dev?.name} · ${dev?.vendor} ${dev?.model}${inside ? ` · ${inside} inside` : ""}`
-                      : dev
-                        ? ""
-                        : "empty — click to add"}
+                    {label}
                   </button>
                 </div>
               );
