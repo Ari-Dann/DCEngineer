@@ -108,7 +108,7 @@ function memoryStore() {
   };
 }
 
-test("open device drafts survive a simulated iPhone page reload", () => {
+test("open device drafts survive a simulated mobile page reload", () => {
   const orig = globalThis.localStorage;
   Object.defineProperty(globalThis, "localStorage", { configurable: true, value: memoryStore() });
   try {

@@ -1,4 +1,4 @@
-/** Helpers so iPhone WebKit (Chrome/Edge/Firefox/Safari) does not drop the last keystrokes. */
+/** Live-field helpers for phone browsers (iOS WebKit, Android Chrome/Vanadium, Capacitor WebView). */
 
 export const IDENTIFIER_INPUT_PROPS = {
   autoComplete: "off" as const,

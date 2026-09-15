@@ -185,6 +185,7 @@ function Combo({
   }
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
+  const commitLock = useRef(false);
   const typed = (open ? filter : value).trim();
   const needle = (open ? filter : "").trim().toLowerCase();
   const shown = needle ? unique.filter((o) => o.toLowerCase().includes(needle)) : unique;
@@ -195,7 +196,18 @@ function Combo({
     onChange(next);
     setOpen(false);
     setFilter("");
-    if (next || allowEmpty) onCommit?.(next);
+    if (!(next || allowEmpty)) return;
+    if (commitLock.current) return;
+    commitLock.current = true;
+    onCommit?.(next);
+    window.setTimeout(() => {
+      commitLock.current = false;
+    }, 0);
+  }
+
+  function pickFromPointer(e: { preventDefault: () => void }, next: string) {
+    e.preventDefault();
+    pick(next);
   }
 
   return (
@@ -225,17 +237,35 @@ function Combo({
         {open && (
           <div className="combo-list">
             {showEmpty && (
-              <button type="button" className="combo-empty" onPointerDown={(e) => { e.preventDefault(); pick(""); }}>
+              <button
+                type="button"
+                className="combo-empty"
+                onPointerDown={(e) => pickFromPointer(e, "")}
+                onMouseDown={(e) => pickFromPointer(e, "")}
+                onClick={() => pick("")}
+              >
                 {emptyLabel}
               </button>
             )}
             {shown.slice(0, 40).map((o) => (
-              <button type="button" key={o} onPointerDown={(e) => { e.preventDefault(); pick(o); }}>
+              <button
+                type="button"
+                key={o}
+                onPointerDown={(e) => pickFromPointer(e, o)}
+                onMouseDown={(e) => pickFromPointer(e, o)}
+                onClick={() => pick(o)}
+              >
                 {o}
               </button>
             ))}
             {isNew && (
-              <button type="button" className="combo-add" onPointerDown={(e) => { e.preventDefault(); pick(typed); }}>
+              <button
+                type="button"
+                className="combo-add"
+                onPointerDown={(e) => pickFromPointer(e, typed)}
+                onMouseDown={(e) => pickFromPointer(e, typed)}
+                onClick={() => pick(typed)}
+              >
                 Add “{typed}” for next time
               </button>
             )}
@@ -592,7 +622,7 @@ export function DeviceFields({
             onChange={(e) => set({ owner: e.target.value })}
             placeholder="client / tenant sharing this rack"
             data-draft="owner"
-            {...IDENTIFIER_INPUT_PROPS}
+            autoComplete="off"
           />
           <datalist id="dce-owners">
             {Array.from(new Set(devices.map((d) => (d.owner || "").trim()).filter(Boolean))).map((owner) => (
@@ -723,7 +753,7 @@ export function DeviceFields({
           }}
           placeholder="core switch, hypervisor, WAN edge…"
           data-draft="function"
-          {...IDENTIFIER_INPUT_PROPS}
+          autoComplete="off"
         />
         <datalist id="dce-functions">
           {(catalog?.functions ?? []).map((f) => (
