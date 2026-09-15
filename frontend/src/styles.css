@@ -255,6 +255,7 @@ p { margin: 0 0 0.75rem; color: var(--muted); }
 .field input, .field select, .field textarea {
   min-height: 44px; padding: 10px 12px; border-radius: 10px;
   border: 1px solid var(--border); background: var(--bg); width: 100%;
+  font-size: 16px;
 }
 .field textarea { min-height: 88px; resize: vertical; }
 .scan-field { display: flex; gap: 8px; align-items: stretch; }
@@ -581,7 +582,12 @@ tr.clickable { cursor: pointer; }
 .combo-list button:hover, .combo-list button:focus { background: var(--bg-hover); }
 .combo-list .combo-add { color: var(--accent-2); font-weight: 650; }
 .combo-list .combo-empty { color: var(--muted); font-style: italic; }
-.camera-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.camera-head {
+  position: sticky; top: -16px; z-index: 6;
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  margin: -4px -4px 12px; padding: 4px 4px 12px;
+  background: var(--bg-card);
+}
 .camera-actions { display: grid; gap: 8px; }
 .viewfinder {
   position: relative;

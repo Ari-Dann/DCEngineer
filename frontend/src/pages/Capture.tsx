@@ -10,6 +10,8 @@ import { SavedRestrictionPicker } from "../components/RestrictionPicker";
 import { learnCatalog } from "../catalog";
 import { inheritedPhotoBlockers, photosAllowed, restrictionFields } from "../restriction";
 import { captureDraftHasWork, nextLoad, suggestedDeviceName } from "../loadGuard";
+import { clearCaptureDraft, peekOpenDeviceDraft, readCaptureDraft, writeCaptureDraft } from "../draftStore";
+import { applyDraftFields, commitActiveInput, readDraftFields } from "../formSync";
 
 export default function Capture() {
   const [plist, setPlist] = useState<Project[]>([]);
@@ -33,12 +35,20 @@ export default function Capture() {
   const [deviceMode, setDeviceMode] = useState<EntryMode>("manual");
   const loadSeq = useRef({ id: 0 });
   const deviceSeq = useRef({ id: 0 });
+  const formRef = useRef<HTMLFormElement>(null);
   const draftRef = useRef(draft);
   const photosRef = useRef(photos);
   const pidRef = useRef(pid);
+  const ridRef = useRef(rid);
+  const areaIdRef = useRef(areaId);
+  const rowIdRef = useRef(rowId);
+  const restoredPid = useRef<number | "">("");
   draftRef.current = draft;
   photosRef.current = photos;
   pidRef.current = pid;
+  ridRef.current = rid;
+  areaIdRef.current = areaId;
+  rowIdRef.current = rowId;
 
   useEffect(() => {
     projects.list().then((rows) => {
@@ -51,6 +61,58 @@ export default function Capture() {
     if (!pid) return;
     reloadLayout();
   }, [pid]);
+
+  useEffect(() => {
+    if (!pid || restoredPid.current === pid) return;
+    const stored = readCaptureDraft<DeviceDraft>(Number(pid));
+    restoredPid.current = pid;
+    if (!stored?.draft) return;
+    setDraft({ ...stored.draft, rack_id: stored.rackId });
+    if (stored.areaId !== "") setAreaId(stored.areaId);
+    if (stored.rowId !== "") setRowId(stored.rowId);
+    if (stored.rackId !== "") setRid(stored.rackId);
+  }, [pid]);
+
+  useEffect(() => {
+    if (!pid) return;
+    writeCaptureDraft({
+      projectId: Number(pid),
+      areaId,
+      rowId,
+      rackId: rid,
+      draft,
+      savedAt: Date.now(),
+    });
+  }, [pid, areaId, rowId, rid, draft]);
+
+  useEffect(() => {
+    function flush() {
+      commitActiveInput(formRef.current);
+      const merged = applyDraftFields(draftRef.current, readDraftFields(formRef.current));
+      draftRef.current = merged;
+      const projectId = pidRef.current;
+      if (!projectId) return;
+      writeCaptureDraft({
+        projectId: Number(projectId),
+        areaId: areaIdRef.current,
+        rowId: rowIdRef.current,
+        rackId: ridRef.current,
+        draft: merged,
+        savedAt: Date.now(),
+      });
+    }
+    function onHide() {
+      if (document.visibilityState === "hidden") flush();
+    }
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onHide);
+    document.addEventListener("freeze", flush as EventListener);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onHide);
+      document.removeEventListener("freeze", flush as EventListener);
+    };
+  }, []);
 
   async function reloadLayout() {
     if (!pid) return;
@@ -79,7 +141,9 @@ export default function Capture() {
   }, [rid]);
 
   async function flushOpenDraft(rackId: number | "") {
-    const current = draftRef.current;
+    commitActiveInput(formRef.current);
+    const current = applyDraftFields(draftRef.current, readDraftFields(formRef.current));
+    draftRef.current = current;
     const currentPhotos = photosRef.current;
     const projectId = pidRef.current;
     if (!projectId || !captureDraftHasWork(current, currentPhotos.length)) return;
@@ -148,6 +212,14 @@ export default function Capture() {
     loadDevices().catch(() => undefined);
   }, [pid]);
 
+  useEffect(() => {
+    if (!pid || !devices.length || editing) return;
+    const open = peekOpenDeviceDraft<DeviceDraft>();
+    if (!open || open.projectId !== Number(pid) || !open.deviceId) return;
+    const found = devices.find((d) => d.id === open.deviceId);
+    if (found) setEditing(found);
+  }, [pid, devices, editing]);
+
   const rackDevices = rid ? devices.filter((d) => d.rack_id === rid) : devices;
 
   async function onSubmit(e: FormEvent) {
@@ -158,7 +230,11 @@ export default function Capture() {
       setError("Select a project first.");
       return;
     }
-    const body = payloadFromDraft({ ...draft, rack_id: rid });
+    commitActiveInput(formRef.current);
+    const current = applyDraftFields(draftRef.current, readDraftFields(formRef.current));
+    draftRef.current = current;
+    setDraft(current);
+    const body = payloadFromDraft({ ...current, rack_id: rid });
     if (!body.name) {
       setError("Device name is required.");
       return;
@@ -167,7 +243,7 @@ export default function Capture() {
     try {
       const created = await projects.addDevice(Number(pid), body);
       if (photos.length) {
-        await uploadPhotos("device", created.id, photos, draft.restricted);
+        await uploadPhotos("device", created.id, photos, current.restricted);
       }
       await learnCatalog({
         vendor: created.vendor,
@@ -176,19 +252,28 @@ export default function Capture() {
         function: created.function,
       });
       setCatalogNonce((n) => n + 1);
+      clearCaptureDraft(Number(pid));
       setDraft({
         ...emptyDraft(rid),
-        device_type: draft.device_type,
-        vendor: draft.vendor,
-        fan_orientation: draft.fan_orientation,
-        indicator_type: draft.indicator_type,
-        indicator_color: draft.indicator_type === "none" ? "none" : draft.indicator_color,
+        device_type: current.device_type,
+        vendor: current.vendor,
+        fan_orientation: current.fan_orientation,
+        indicator_type: current.indicator_type,
+        indicator_color: current.indicator_type === "none" ? "none" : current.indicator_color,
       });
       setPhotos([]);
       setMsg(`Saved ${created.name}. Ready for the next device.`);
       await loadDevices();
     } catch {
       enqueue({ method: "POST", path: `/api/projects/${pid}/devices`, body });
+      writeCaptureDraft({
+        projectId: Number(pid),
+        areaId,
+        rowId,
+        rackId: rid,
+        draft: current,
+        savedAt: Date.now(),
+      });
       setMsg(
         photos.length
           ? "No network — device fields queued. Photos need a connection; recapture after sync."
@@ -277,7 +362,7 @@ export default function Capture() {
         />
       )}
 
-      <form className="card" onSubmit={onSubmit} style={{ marginTop: 16 }}>
+      <form className="card" onSubmit={onSubmit} ref={formRef} style={{ marginTop: 16 }}>
         <EntryModeRadios name="entry-capture-device" value={deviceMode} onChange={setDeviceMode} />
         <div className="row">
           <label className="field">

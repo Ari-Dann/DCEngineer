@@ -1,6 +1,6 @@
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { getSession, logout } from "./api";
+import { getSession, logout, startQueueFlush } from "./api";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Projects from "./pages/Projects";
@@ -115,6 +115,21 @@ function Layout({ children }: { children: ReactNode }) {
     { to: "/work", label: "Work", d: "M9 5h6l2 3h5v12H2V8h5z" },
     { to: "/ops", label: "More", d: "M5 7h14M5 12h14M5 17h10" },
   ];
+
+  useEffect(() => {
+    startQueueFlush();
+  }, []);
+
+  useEffect(() => {
+    function commitOnSubmit() {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT")) {
+        active.blur();
+      }
+    }
+    document.addEventListener("submit", commitOnSubmit, true);
+    return () => document.removeEventListener("submit", commitOnSubmit, true);
+  }, []);
 
   useEffect(() => {
     if (!isDesktopNav()) setSidebarOpen(false);

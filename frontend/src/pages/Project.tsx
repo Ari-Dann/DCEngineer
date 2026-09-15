@@ -30,6 +30,7 @@ import AiImageParse, { EntryMode, EntryModeRadios } from "../components/AiImageP
 import RestrictionPicker, { SavedRestrictionPicker } from "../components/RestrictionPicker";
 import { parseIdParam, projectHref, rackHref } from "../nav";
 import { nextLoad } from "../loadGuard";
+import { peekOpenDeviceDraft } from "../draftStore";
 import {
   inheritedPhotoBlockers,
   photosAllowed,
@@ -168,6 +169,14 @@ export default function Project() {
       nextLoad(loadSeq.current);
     };
   }, [pid]);
+
+  useEffect(() => {
+    if (!devices.length || editing) return;
+    const open = peekOpenDeviceDraft();
+    if (!open || open.projectId !== pid || !open.deviceId) return;
+    const found = devices.find((d) => d.id === open.deviceId);
+    if (found) setEditing(found);
+  }, [devices, editing, pid]);
 
   useEffect(() => {
     setRowAreaId(areaFilter || "");

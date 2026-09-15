@@ -14,6 +14,9 @@ const REFRESH = "dce.refresh";
 const META = "dce.meta";
 const QUEUE = "dce.queue";
 
+let refreshInFlight: Promise<Session | null> | null = null;
+let queueFlushBound = false;
+
 export function getSession(): Session | null {
   const raw = localStorage.getItem(META);
   const access = localStorage.getItem(ACCESS);
@@ -54,32 +57,68 @@ export function queuedCount() {
   }
 }
 
+function wantsKeepalive(init: RequestInit) {
+  if (init.keepalive != null) return Boolean(init.keepalive);
+  if (typeof document === "undefined") return false;
+  if (document.visibilityState !== "hidden") return false;
+  if (init.body instanceof FormData) return false;
+  const method = (init.method || "GET").toUpperCase();
+  return method !== "GET" && method !== "HEAD";
+}
+
 async function raw(path: string, init: RequestInit = {}, token?: string) {
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  return fetch(path, { ...init, cache: "no-store", headers });
+  return fetch(path, { ...init, cache: "no-store", keepalive: wantsKeepalive(init), headers });
+}
+
+/** One in-flight refresh. A second 401 must not revoke the new token and wipe the session. */
+export async function refreshSession(session?: Session | null): Promise<Session | null> {
+  const current = session ?? getSession();
+  if (!current?.refresh_token) return null;
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    try {
+      const refreshed = await raw("/api/auth/refresh", {
+        method: "POST",
+        body: JSON.stringify({ refresh_token: current.refresh_token }),
+      });
+      if (refreshed.ok) {
+        const next = (await refreshed.json()) as Session;
+        setSession(next);
+        return next;
+      }
+      const latest = getSession();
+      if (latest && latest.refresh_token !== current.refresh_token) return latest;
+      clearSession();
+      return null;
+    } catch {
+      const latest = getSession();
+      if (latest && latest.refresh_token !== current.refresh_token) return latest;
+      return null;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
+
+export function resetAuthForTests() {
+  refreshInFlight = null;
+  queueFlushBound = false;
 }
 
 export async function api<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
   let session = getSession();
   let res = await raw(path, init, session?.access_token);
   if (res.status === 401 && session?.refresh_token) {
-    const refreshed = await raw("/api/auth/refresh", {
-      method: "POST",
-      body: JSON.stringify({ refresh_token: session.refresh_token }),
-    });
-    if (refreshed.ok) {
-      const next = (await refreshed.json()) as Session;
-      setSession(next);
-      session = next;
-      res = await raw(path, init, next.access_token);
-    } else {
-      clearSession();
-      throw new Error("Session expired");
-    }
+    const next = await refreshSession(session);
+    if (!next) throw new Error("Session expired");
+    session = next;
+    res = await raw(path, init, next.access_token);
   }
   if (!res.ok) {
     let detail = res.statusText;
@@ -130,6 +169,21 @@ export async function flushQueue() {
   }
   localStorage.setItem(QUEUE, JSON.stringify(remain));
   return q.length - remain.length;
+}
+
+export function startQueueFlush() {
+  if (queueFlushBound || typeof window === "undefined") return;
+  queueFlushBound = true;
+  const run = () => {
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+    void flushQueue().catch(() => undefined);
+  };
+  window.addEventListener("online", run);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") run();
+  });
+  window.addEventListener("pageshow", run);
+  run();
 }
 
 export const projects = {
@@ -439,18 +493,9 @@ async function authFetch(path: string, init: RequestInit = {}) {
   let session = getSession();
   let res = await raw(path, init, session?.access_token);
   if (res.status === 401 && session?.refresh_token) {
-    const refreshed = await raw("/api/auth/refresh", {
-      method: "POST",
-      body: JSON.stringify({ refresh_token: session.refresh_token }),
-    });
-    if (refreshed.ok) {
-      const next = (await refreshed.json()) as Session;
-      setSession(next);
-      res = await raw(path, init, next.access_token);
-    } else {
-      clearSession();
-      throw new Error("Session expired");
-    }
+    const next = await refreshSession(session);
+    if (!next) throw new Error("Session expired");
+    res = await raw(path, init, next.access_token);
   }
   return res;
 }

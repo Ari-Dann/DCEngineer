@@ -9,7 +9,8 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import RestrictionPicker from "../components/RestrictionPicker";
 import { parseIdParam, projectHref } from "../nav";
 import { inheritedPhotoBlockers, photosAllowed, restrictionFields, restrictionTypeOf } from "../restriction";
-import { nextLoad } from "../loadGuard";
+import { captureDraftHasWork, nextLoad } from "../loadGuard";
+import { peekOpenDeviceDraft } from "../draftStore";
 
 function deviceTypeClass(type?: string) {
   const slug = (type || "other")
@@ -76,6 +77,20 @@ export default function RackPage() {
       nextLoad(loadSeq.current);
     };
   }, [pid, rid]);
+
+  useEffect(() => {
+    if (!elev || elev.rack.id !== rid || editing || adding) return;
+    const open = peekOpenDeviceDraft<DeviceDraft>();
+    if (!open || open.projectId !== pid) return;
+    if (open.deviceId) {
+      const found = elev.devices.find((d) => d.id === open.deviceId);
+      if (found) setEditing(found);
+      return;
+    }
+    if (open.rackId === rid && open.draft && captureDraftHasWork(open.draft)) {
+      setAdding({ ...emptyDraft(rid), ...open.draft, rack_id: rid });
+    }
+  }, [elev, pid, rid, editing, adding]);
 
   const byId = useMemo(() => {
     const m = new Map<number, Device>();
