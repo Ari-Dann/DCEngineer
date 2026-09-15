@@ -232,6 +232,14 @@ p { margin: 0 0 0.75rem; color: var(--muted); }
   display: flex;
   flex-direction: column;
 }
+.rack-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
 .rack-layout { min-width: 0; }
 .rack-elevation-col, .rack-side { min-width: 0; min-height: 0; }
 @media (max-width: 899px) {
@@ -400,6 +408,7 @@ tr:hover td { background: var(--bg-hover); }
 }
 .ru .slot.empty { color: var(--empty); }
 .ru .slot.empty:hover, .ru .slot.empty.picked { color: var(--accent); background: var(--bg-hover); }
+.elevation.dense .ru .slot.empty { font-size: 0; }
 .dev-server { background: color-mix(in srgb, var(--accent) 35%, var(--bg-elev)); }
 .dev-switch { background: color-mix(in srgb, var(--accent-2) 35%, var(--bg-elev)); }
 .dev-router { background: color-mix(in srgb, #5ec8e8 40%, var(--bg-elev)); }

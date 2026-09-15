@@ -141,7 +141,7 @@ export default function RackPage() {
       <p>
         <Link to={backHref}>← {backRow ? backRowName : elev.rack.name}</Link>
       </p>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+      <div className="rack-heading">
         <div>
           <h1>Rack {elev.rack.name}</h1>
           <p>
@@ -164,7 +164,11 @@ export default function RackPage() {
       {error && <div className="error">{error}</div>}
       <div className="grid two rack-layout">
         <div className="rack-elevation-col">
-          <div className="elevation" role="list" aria-label={`${elev.rack.ru_height}U rack elevation`}>
+          <div
+            className={`elevation${elev.slots.length >= 48 ? " dense" : ""}`}
+            role="list"
+            aria-label={`${elev.rack.ru_height}U rack elevation`}
+          >
             {elev.slots.map((s) => {
               const dev = s.device_id ? byId.get(s.device_id) : undefined;
               const top = dev && (dev.ru_end || dev.ru_start) === s.u;
