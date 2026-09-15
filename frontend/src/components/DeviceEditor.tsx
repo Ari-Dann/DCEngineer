@@ -1018,6 +1018,9 @@ export function DeviceFields({
   );
 }
 
+/** Wait this long after the last keystroke before PATCH. Close, Save, and leaving the tab still save immediately. */
+const AUTOSAVE_AFTER_IDLE_MS = 10_000;
+
 export function DeviceEditorModal({
   projectId,
   device,
@@ -1239,7 +1242,7 @@ export function DeviceEditorModal({
     if (!savedRef.current) return;
     const timer = window.setTimeout(() => {
       void persistRef.current({ autoName: true }).catch(() => undefined);
-    }, 1500);
+    }, AUTOSAVE_AFTER_IDLE_MS);
     return () => window.clearTimeout(timer);
   }, [draft]);
 
