@@ -1,6 +1,9 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Catalog, DEFAULT_DEVICE_TYPES, OTHER, learnCatalog, loadCatalog } from "../catalog";
 import { AisleRow, Area, Device, PDU, Project, Rack, enqueue, pduLabel, projects, uploadFile } from "../api";
+import { clearOpenDeviceDraft, readOpenDeviceDraft, writeOpenDeviceDraft } from "../draftStore";
+import { IDENTIFIER_INPUT_PROPS, applyDraftFields, clampRu, commitActiveInput, payloadsDiffer, readDraftFields } from "../formSync";
+import { runLatest } from "../persistLock";
 import {
   displayFromWatts,
   formatHierarchyPower,
@@ -122,6 +125,8 @@ export function draftFromDevice(d: Device): DeviceDraft {
 
 export function payloadFromDraft(draft: DeviceDraft) {
   const rackId = draft.rack_id === "" ? null : Number(draft.rack_id);
+  const ruStart = clampRu(draft.ru_start, 1);
+  const ruHeight = clampRu(draft.ru_height, 1);
   return {
     name: draft.name,
     hostname: draft.hostname,
@@ -133,8 +138,8 @@ export function payloadFromDraft(draft: DeviceDraft) {
     device_type: draft.device_type,
     function: draft.function,
     rack_id: rackId,
-    ru_start: draft.ru_start,
-    ru_end: draft.ru_start + draft.ru_height - 1,
+    ru_start: ruStart,
+    ru_end: ruStart + ruHeight - 1,
     fan_orientation: draft.fan_orientation,
     indicator_type: draft.indicator_type,
     indicator_color: draft.indicator_type === "none" ? "none" : draft.indicator_color,
@@ -163,6 +168,7 @@ function Combo({
   onCommit,
   allowEmpty = false,
   emptyLabel = "Unspecified",
+  dataDraft,
 }: {
   label: string;
   options: string[];
@@ -171,6 +177,7 @@ function Combo({
   onCommit?: (v: string) => void;
   allowEmpty?: boolean;
   emptyLabel?: string;
+  dataDraft?: string;
 }) {
   const unique = Array.from(new Set(options.filter((o) => o && o.toLowerCase() !== OTHER.toLowerCase())));
   if (value && value.toLowerCase() !== OTHER.toLowerCase() && !unique.some((o) => o.toLowerCase() === value.toLowerCase())) {
@@ -198,7 +205,8 @@ function Combo({
         <input
           value={open ? filter : value}
           placeholder={allowEmpty ? emptyLabel : "Type to search or add a new value"}
-          autoComplete="off"
+          data-draft={dataDraft}
+          {...IDENTIFIER_INPUT_PROPS}
           onFocus={() => {
             setFilter(value);
             setOpen(true);
@@ -217,17 +225,17 @@ function Combo({
         {open && (
           <div className="combo-list">
             {showEmpty && (
-              <button type="button" className="combo-empty" onMouseDown={(e) => { e.preventDefault(); pick(""); }}>
+              <button type="button" className="combo-empty" onPointerDown={(e) => { e.preventDefault(); pick(""); }}>
                 {emptyLabel}
               </button>
             )}
             {shown.slice(0, 40).map((o) => (
-              <button type="button" key={o} onMouseDown={(e) => { e.preventDefault(); pick(o); }}>
+              <button type="button" key={o} onPointerDown={(e) => { e.preventDefault(); pick(o); }}>
                 {o}
               </button>
             ))}
             {isNew && (
-              <button type="button" className="combo-add" onMouseDown={(e) => { e.preventDefault(); pick(typed); }}>
+              <button type="button" className="combo-add" onPointerDown={(e) => { e.preventDefault(); pick(typed); }}>
                 Add “{typed}” for next time
               </button>
             )}
@@ -512,7 +520,13 @@ export function DeviceFields({
     <>
       <label className="field">
         <span>Device name</span>
-        <input value={value.name} onChange={(e) => set({ name: e.target.value })} required autoComplete="off" />
+        <input
+          value={value.name}
+          onChange={(e) => set({ name: e.target.value })}
+          required
+          data-draft="name"
+          {...IDENTIFIER_INPUT_PROPS}
+        />
       </label>
       <div className="row">
         <Combo
@@ -521,6 +535,7 @@ export function DeviceFields({
           value={value.vendor}
           onChange={(vendor) => set({ vendor, model: "" })}
           onCommit={(vendor) => persist({ vendor })}
+          dataDraft="vendor"
         />
         <Combo
           label="Model"
@@ -528,6 +543,7 @@ export function DeviceFields({
           value={value.model}
           onChange={(model) => set({ model })}
           onCommit={(model) => persist({ vendor: value.vendor, model })}
+          dataDraft="model"
         />
       </div>
       <label className="field">
@@ -536,7 +552,8 @@ export function DeviceFields({
           <input
             value={value.serial}
             onChange={(e) => set({ serial: e.target.value })}
-            autoComplete="off"
+            data-draft="serial"
+            {...IDENTIFIER_INPUT_PROPS}
           />
           <button type="button" className="btn" onClick={() => setCam("serial")}>
             Scan
@@ -546,7 +563,12 @@ export function DeviceFields({
       <label className="field">
         <span>Asset tag</span>
         <div className="scan-field">
-          <input value={value.asset_tag} onChange={(e) => set({ asset_tag: e.target.value })} autoComplete="off" />
+          <input
+            value={value.asset_tag}
+            onChange={(e) => set({ asset_tag: e.target.value })}
+            data-draft="asset_tag"
+            {...IDENTIFIER_INPUT_PROPS}
+          />
           <button type="button" className="btn" onClick={() => setCam("asset_tag")}>
             Scan
           </button>
@@ -555,7 +577,12 @@ export function DeviceFields({
       <div className="row">
         <label className="field">
           <span>Hostname</span>
-          <input value={value.hostname} onChange={(e) => set({ hostname: e.target.value })} autoComplete="off" />
+          <input
+            value={value.hostname}
+            onChange={(e) => set({ hostname: e.target.value })}
+            data-draft="hostname"
+            {...IDENTIFIER_INPUT_PROPS}
+          />
         </label>
         <label className="field">
           <span>Owner</span>
@@ -564,7 +591,8 @@ export function DeviceFields({
             value={value.owner}
             onChange={(e) => set({ owner: e.target.value })}
             placeholder="client / tenant sharing this rack"
-            autoComplete="off"
+            data-draft="owner"
+            {...IDENTIFIER_INPUT_PROPS}
           />
           <datalist id="dce-owners">
             {Array.from(new Set(devices.map((d) => (d.owner || "").trim()).filter(Boolean))).map((owner) => (
@@ -581,6 +609,7 @@ export function DeviceFields({
           value={value.device_type}
           onChange={(device_type) => set({ device_type })}
           onCommit={(device_type) => persist({ device_type })}
+          dataDraft="device_type"
         />
         <label className="field">
           <span>RU start (from bottom)</span>
@@ -589,6 +618,7 @@ export function DeviceFields({
             min={1}
             max={70}
             value={value.ru_start}
+            data-draft="ru_start"
             onChange={(e) => set({ ru_start: Number(e.target.value) })}
           />
         </label>
@@ -599,6 +629,7 @@ export function DeviceFields({
             min={1}
             max={70}
             value={value.ru_height}
+            data-draft="ru_height"
             onChange={(e) => set({ ru_height: Number(e.target.value) })}
           />
         </label>
@@ -649,6 +680,7 @@ export function DeviceFields({
             <span>Physical rack</span>
             <select
               value={value.rack_id}
+              data-draft="rack_id"
               onChange={(e) => assignRack(e.target.value ? Number(e.target.value) : "")}
             >
               <option value="">Unlocated — assign later</option>
@@ -690,7 +722,8 @@ export function DeviceFields({
             if (fn) persist({ function: fn });
           }}
           placeholder="core switch, hypervisor, WAN edge…"
-          autoComplete="off"
+          data-draft="function"
+          {...IDENTIFIER_INPUT_PROPS}
         />
         <datalist id="dce-functions">
           {(catalog?.functions ?? []).map((f) => (
@@ -701,7 +734,12 @@ export function DeviceFields({
       <label className="field">
         <span>Management IP</span>
         <div className="scan-field">
-          <input value={value.management_ip} onChange={(e) => set({ management_ip: e.target.value })} autoComplete="off" />
+          <input
+            value={value.management_ip}
+            onChange={(e) => set({ management_ip: e.target.value })}
+            data-draft="management_ip"
+            {...IDENTIFIER_INPUT_PROPS}
+          />
           <button type="button" className="btn" onClick={() => setCam("ip")}>
             Scan
           </button>
@@ -747,6 +785,7 @@ export function DeviceFields({
               min={0}
               step={0.1}
               value={value.dc_power_draw_amps}
+              data-draft="dc_power_draw_amps"
               onChange={(e) =>
                 set({ dc_power_draw_amps: e.target.value === "" ? "" : Number(e.target.value) })
               }
@@ -763,6 +802,7 @@ export function DeviceFields({
           <span>PDU A</span>
           <select
             value={value.pdu_a_id}
+            data-draft="pdu_a_id"
             onChange={(e) => set({ pdu_a_id: e.target.value ? Number(e.target.value) : "" })}
           >
             <option value="">Not connected</option>
@@ -780,6 +820,7 @@ export function DeviceFields({
           <span>PDU B</span>
           <select
             value={value.pdu_b_id}
+            data-draft="pdu_b_id"
             onChange={(e) => set({ pdu_b_id: e.target.value ? Number(e.target.value) : "" })}
           >
             <option value="">Not connected</option>
@@ -868,6 +909,7 @@ export function DeviceFields({
         <input
           type="checkbox"
           checked={value.undocumented}
+          data-draft="undocumented"
           onChange={(e) => set({ undocumented: e.target.checked })}
         />
         <span>Undocumented vs discovery / CMDB</span>
@@ -875,20 +917,20 @@ export function DeviceFields({
       <div className="row">
         <label className="field">
           <span>EOL date</span>
-          <input type="date" value={value.eol_date} onChange={(e) => set({ eol_date: e.target.value })} />
+          <input type="date" value={value.eol_date} data-draft="eol_date" onChange={(e) => set({ eol_date: e.target.value })} />
         </label>
         <label className="field">
           <span>EOS date</span>
-          <input type="date" value={value.eos_date} onChange={(e) => set({ eos_date: e.target.value })} />
+          <input type="date" value={value.eos_date} data-draft="eos_date" onChange={(e) => set({ eos_date: e.target.value })} />
         </label>
       </div>
       <label className="field">
         <span>Lifecycle notes</span>
-        <input value={value.eol_notes} onChange={(e) => set({ eol_notes: e.target.value })} />
+        <input value={value.eol_notes} data-draft="eol_notes" onChange={(e) => set({ eol_notes: e.target.value })} />
       </label>
       <label className="field">
         <span>Notes / cabling</span>
-        <textarea value={value.notes} onChange={(e) => set({ notes: e.target.value })} />
+        <textarea value={value.notes} data-draft="notes" onChange={(e) => set({ notes: e.target.value })} />
       </label>
 
       {savedDeviceId && projectId ? (
@@ -979,9 +1021,14 @@ export function DeviceEditorModal({
   onDelete?: () => void;
   onSelectDevice?: (d: Device) => void;
 }) {
+  const formRef = useRef<HTMLFormElement>(null);
   const [savedDevice, setSavedDevice] = useState(device ?? null);
   const creating = !savedDevice;
-  const [draft, setDraft] = useState(device ? draftFromDevice(device) : initialDraft || emptyDraft());
+  const [draft, setDraft] = useState(() => {
+    const base = device ? draftFromDevice(device) : initialDraft || emptyDraft();
+    const stored = readOpenDeviceDraft<DeviceDraft>(projectId, device?.id ?? null, base.rack_id);
+    return stored?.draft ? { ...base, ...stored.draft } : base;
+  });
   const baseline = useRef(device ? draftFromDevice(device) : initialDraft || emptyDraft());
   const [photos, setPhotos] = useState<File[]>([]);
   const [error, setError] = useState("");
@@ -989,7 +1036,7 @@ export function DeviceEditorModal({
   const savedRef = useRef(savedDevice);
   const draftRef = useRef(draft);
   const photosRef = useRef(photos);
-  const persistLock = useRef<Promise<Device> | null>(null);
+  const persistLock = useRef<Promise<unknown> | null>(null);
   savedRef.current = savedDevice;
   draftRef.current = draft;
   photosRef.current = photos;
@@ -1000,7 +1047,27 @@ export function DeviceEditorModal({
 
   function isDirty() {
     if (photosRef.current.length) return true;
-    return JSON.stringify(payloadFromDraft(draftRef.current)) !== JSON.stringify(payloadFromDraft(baseline.current));
+    return payloadsDiffer(payloadFromDraft(draftRef.current), payloadFromDraft(baseline.current));
+  }
+
+  function syncDraftFromDom() {
+    commitActiveInput(formRef.current);
+    const merged = applyDraftFields(draftRef.current, readDraftFields(formRef.current));
+    if (payloadsDiffer(merged, draftRef.current)) {
+      draftRef.current = merged;
+      setDraft(merged);
+    }
+  }
+
+  function snapshotDraft() {
+    writeOpenDeviceDraft({
+      projectId,
+      deviceId: savedRef.current?.id ?? null,
+      rackId: draftRef.current.rack_id,
+      path: typeof location !== "undefined" ? location.pathname : "",
+      draft: draftRef.current,
+      savedAt: Date.now(),
+    });
   }
 
   async function persist(opts?: { autoName?: boolean }) {
@@ -1044,7 +1111,7 @@ export function DeviceEditorModal({
 
   async function queueOrThrow(err: unknown, body: ReturnType<typeof payloadFromDraft>) {
     const message = err instanceof Error ? err.message : "Save failed";
-    const offline = /offline|failed to fetch|network|503/i.test(message);
+    const offline = /offline|failed to fetch|network|503|session expired/i.test(message);
     if (offline) {
       const existing = savedRef.current;
       enqueue({
@@ -1062,28 +1129,41 @@ export function DeviceEditorModal({
   }
 
   async function persistAndNotify(opts?: { autoName?: boolean; files?: File[]; notify?: boolean }) {
-    if (persistLock.current) return persistLock.current;
-    const body = payloadFromDraft({
+    syncDraftFromDom();
+    snapshotDraft();
+    let sent = payloadFromDraft({
       ...draftRef.current,
       name: opts?.autoName ? suggestedDeviceName(draftRef.current.name, draftRef.current.ru_start) : draftRef.current.name,
     });
-    const run = (async () => {
-      const saved = await persist(opts);
-      const files = opts?.files ?? photosRef.current;
-      if (files.length) await persistPhotos(saved, files);
-      setSavedDevice(saved);
-      if (opts?.notify !== false) onSaved(saved);
-      return saved;
-    })();
-    persistLock.current = run;
-    try {
-      return await run;
-    } catch (err) {
-      await queueOrThrow(err, body);
-      return undefined as never;
-    } finally {
-      persistLock.current = null;
-    }
+    return runLatest(
+      persistLock,
+      async () => {
+        sent = payloadFromDraft({
+          ...draftRef.current,
+          name: opts?.autoName ? suggestedDeviceName(draftRef.current.name, draftRef.current.ru_start) : draftRef.current.name,
+        });
+        try {
+          const saved = await persist(opts);
+          const files = opts?.files ?? photosRef.current;
+          if (files.length) await persistPhotos(saved, files);
+          setSavedDevice(saved);
+          if (opts?.notify !== false) onSaved(saved);
+          if (!photosRef.current.length) clearOpenDeviceDraft(projectId, saved.id);
+          return saved;
+        } catch (err) {
+          snapshotDraft();
+          await queueOrThrow(err, sent);
+          return undefined as never;
+        }
+      },
+      () => {
+        const now = payloadFromDraft({
+          ...draftRef.current,
+          name: opts?.autoName ? suggestedDeviceName(draftRef.current.name, draftRef.current.ru_start) : draftRef.current.name,
+        });
+        return payloadsDiffer(now, sent) || photosRef.current.length > 0;
+      },
+    );
   }
 
   const persistRef = useRef(persistAndNotify);
@@ -1093,6 +1173,17 @@ export function DeviceEditorModal({
 
   useEffect(() => {
     function flush() {
+      commitActiveInput(formRef.current);
+      const merged = applyDraftFields(draftRef.current, readDraftFields(formRef.current));
+      draftRef.current = merged;
+      writeOpenDeviceDraft({
+        projectId,
+        deviceId: savedRef.current?.id ?? null,
+        rackId: merged.rack_id,
+        path: typeof location !== "undefined" ? location.pathname : "",
+        draft: merged,
+        savedAt: Date.now(),
+      });
       if (!dirtyRef.current()) return;
       void persistRef.current({ autoName: true }).catch(() => undefined);
     }
@@ -1101,14 +1192,26 @@ export function DeviceEditorModal({
     }
     window.addEventListener("pagehide", flush);
     document.addEventListener("visibilitychange", onHide);
+    document.addEventListener("freeze", flush as EventListener);
     return () => {
       window.removeEventListener("pagehide", flush);
       document.removeEventListener("visibilitychange", onHide);
+      document.removeEventListener("freeze", flush as EventListener);
       if (dirtyRef.current()) {
         void persistRef.current({ autoName: true, notify: false }).catch(() => undefined);
       }
     };
-  }, []);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!isDirty()) return;
+    snapshotDraft();
+    if (!savedRef.current) return;
+    const timer = window.setTimeout(() => {
+      void persistRef.current({ autoName: true }).catch(() => undefined);
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [draft]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -1127,7 +1230,10 @@ export function DeviceEditorModal({
 
   async function handleClose() {
     if (busy) return;
+    syncDraftFromDom();
+    snapshotDraft();
     if (!isDirty()) {
+      clearOpenDeviceDraft(projectId, savedRef.current?.id ?? null);
       onClose();
       return;
     }
@@ -1145,6 +1251,7 @@ export function DeviceEditorModal({
 
   async function handlePendingPhotos(files: File[]) {
     setPhotos(files);
+    photosRef.current = files;
     setBusy(true);
     setError("");
     try {
@@ -1181,7 +1288,7 @@ export function DeviceEditorModal({
 
   return (
     <div className="overlay" role="dialog" aria-modal="true">
-      <form className="sheet" onSubmit={onSubmit}>
+      <form className="sheet" onSubmit={onSubmit} ref={formRef}>
         <div className="camera-head">
           <h2>{title}</h2>
           <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

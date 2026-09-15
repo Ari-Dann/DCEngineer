@@ -69,6 +69,17 @@ def test_login_rejects_bad_password(client):
     assert res.status_code == 401
 
 
+def test_refresh_rotation_invalidates_the_used_token(client):
+    login = client.post("/api/auth/login", json={"username": "admin", "password": "adminpass1"})
+    assert login.status_code == 200
+    refresh = login.json()["refresh_token"]
+    first = client.post("/api/auth/refresh", json={"refresh_token": refresh})
+    assert first.status_code == 200
+    assert first.json()["access_token"]
+    second = client.post("/api/auth/refresh", json={"refresh_token": refresh})
+    assert second.status_code == 401
+
+
 def test_rbi_flow_and_export(client, auth):
     project = client.post(
         "/api/projects",
