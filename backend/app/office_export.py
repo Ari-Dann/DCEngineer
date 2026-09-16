@@ -16,7 +16,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 from sqlalchemy.orm import Session
 
 from app.models import AisleRow, Area, Attachment, Device, Project, Rack
-from app.nesting import elevation_occupants, nested_count_for
+from app.nesting import elevation_blocks, elevation_occupants, nested_count_for
 from app.rbi_export import HEADER_FILL, HEADER_FONT, _autosize, _header, rack_svg
 from app.storage import get_storage
 
@@ -1051,7 +1051,6 @@ def build_vsdx(layout: Layout) -> bytes:
         elev_w = 4.6
         top_y = 15.6
         occupied = elevation_occupants(layout.devices_by_rack.get(rack.id, []))
-        drawn: set[int] = set()
         for u in range(ru, 0, -1):
             y = top_y - (ru - u + 0.5) * slot_h
             page.shapes.append(
@@ -1067,48 +1066,45 @@ def build_vsdx(layout: Layout) -> bytes:
                 )
             )
             sid += 1
-            device = occupied.get(u)
-            if device and device.id not in drawn and (device.ru_end or device.ru_start) == u:
-                start, end = int(device.ru_start), int(device.ru_end or device.ru_start)
-                span = abs(end - start) + 1
-                top_u = max(start, end)
-                cy = top_y - (ru - top_u + span / 2) * slot_h
-                owner = getattr(device, "owner", "") or ""
-                label = f"{device.name}  {device.vendor} {device.model}".strip()
-                if owner:
-                    label += f"  ·  {owner}"
-                inside = nested_count_for(device, layout.devices_by_rack.get(rack.id, []))
-                if inside:
-                    label += f"  ·  {inside} inside"
-                page.shapes.append(
-                    _shape_xml(
-                        sid,
-                        pin_x=2.9,
-                        pin_y=cy,
-                        width=elev_w,
-                        height=span * slot_h * 0.92,
-                        text=label,
-                        fill=DEVICE_FILL.get(device.device_type, "#8B9BB0"),
-                        font_color="#0B0F14",
-                        font_size_in=0.08,
-                    )
+            if occupied.get(u):
+                continue
+            page.shapes.append(
+                _shape_xml(
+                    sid,
+                    pin_x=2.9,
+                    pin_y=y,
+                    width=elev_w,
+                    height=slot_h * 0.92,
+                    text="",
+                    fill="#E8EEF6",
+                    font_color="#8B9BB0",
                 )
-                sid += 1
-                drawn.add(device.id)
-            elif not device:
-                page.shapes.append(
-                    _shape_xml(
-                        sid,
-                        pin_x=2.9,
-                        pin_y=y,
-                        width=elev_w,
-                        height=slot_h * 0.92,
-                        text="",
-                        fill="#E8EEF6",
-                        font_color="#8B9BB0",
-                    )
+            )
+            sid += 1
+        rack_devices = layout.devices_by_rack.get(rack.id, [])
+        for device, top_u, span in elevation_blocks(occupied):
+            cy = top_y - (ru - top_u + span / 2) * slot_h
+            owner = getattr(device, "owner", "") or ""
+            label = f"{device.name}  {device.vendor} {device.model}".strip()
+            if owner:
+                label += f"  ·  {owner}"
+            inside = nested_count_for(device, rack_devices)
+            if inside:
+                label += f"  ·  {inside} inside"
+            page.shapes.append(
+                _shape_xml(
+                    sid,
+                    pin_x=2.9,
+                    pin_y=cy,
+                    width=elev_w,
+                    height=(span - 1) * slot_h + slot_h * 0.92,
+                    text=label,
+                    fill=DEVICE_FILL.get(device.device_type, "#8B9BB0"),
+                    font_color="#0B0F14",
+                    font_size_in=0.08,
                 )
-                sid += 1
+            )
+            sid += 1
         photo_x = 8.2
         photo_y = 15.2
         photos: list[tuple[str, Picture]] = []
