@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import Area, Cable, Device, Handoff, PDU, PDUPort, Project, Rack
-from app.nesting import elevation_occupants, nested_count_for
+from app.nesting import elevation_blocks, elevation_occupants, nested_count_for
 
 
 HEADER_FILL = PatternFill("solid", fgColor="1B3A4B")
@@ -329,25 +329,21 @@ def rack_svg(rack: Rack, devices: list[Device]) -> str:
         parts.append(
             f'<text x="8" y="{y + 13}" fill="#8b9bb0" font-family="sans-serif" font-size="10">{u}</text>'
         )
-        dev = occupied.get(u)
-        if dev and (dev.ru_end or dev.ru_start) == u:
-            start = int(dev.ru_start)
-            end = int(dev.ru_end or dev.ru_start)
-            span = abs(end - start) + 1
-            top_u = max(start, end)
-            y0 = 32 + (ru - top_u) * row_h
-            fill = colors.get(dev.device_type, colors["other"])
-            parts.append(
-                f'<rect x="44" y="{y0 + 1}" width="{width-60}" height="{span * row_h - 3}" rx="3" fill="{fill}" opacity="0.85"/>'
-            )
-            inside = nested_count_for(dev, devices)
-            label = f"{dev.name}  {dev.vendor} {dev.model}".strip()
-            if inside:
-                label = f"{label}  ({inside} inside)"
-            label = _esc(label)
-            parts.append(
-                f'<text x="52" y="{y0 + 12}" fill="#0b0f14" font-family="sans-serif" font-size="11">{label}</text>'
-            )
+    # Paint devices after every RU rail so a 7U chassis is not covered by later 1U slots.
+    for dev, top_u, span in elevation_blocks(occupied):
+        y0 = 32 + (ru - top_u) * row_h
+        fill = colors.get(dev.device_type, colors["other"])
+        parts.append(
+            f'<rect x="44" y="{y0 + 1}" width="{width-60}" height="{span * row_h - 3}" rx="3" fill="{fill}"/>'
+        )
+        inside = nested_count_for(dev, devices)
+        label = f"{dev.name}  {dev.vendor} {dev.model}".strip()
+        if inside:
+            label = f"{label}  ({inside} inside)"
+        label = _esc(label)
+        parts.append(
+            f'<text x="52" y="{y0 + 12}" fill="#0b0f14" font-family="sans-serif" font-size="11">{label}</text>'
+        )
     parts.append("</svg>")
     return "\n".join(parts)
 

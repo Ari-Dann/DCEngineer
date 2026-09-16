@@ -113,6 +113,19 @@ def elevation_occupants(devices: Iterable[Device]) -> dict[int, Device]:
     return occupied
 
 
+def elevation_blocks(occupied: dict[int, Device]) -> list[tuple[Device, int, int]]:
+    """Contiguous painted runs as (device, top_u, span), highest U first."""
+    blocks: list[tuple[Device, int, int]] = []
+    for u in sorted(occupied, reverse=True):
+        device = occupied[u]
+        if blocks and blocks[-1][0] is device and blocks[-1][1] - blocks[-1][2] == u:
+            prev, top_u, span = blocks[-1]
+            blocks[-1] = (prev, top_u, span + 1)
+        else:
+            blocks.append((device, u, 1))
+    return blocks
+
+
 def nest_devices(devices: list[Device]) -> int:
     """Assign parent_device_id in place. Returns how many devices are nested."""
     by_rack: dict[int, list[Device]] = {}

@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.nesting import elevation_occupants, find_parent, looks_like_container, nest_devices, occupies_elevation
+from app.nesting import elevation_blocks, elevation_occupants, find_parent, looks_like_container, nest_devices, occupies_elevation
 
 
 def _dev(**kwargs):
@@ -118,3 +118,22 @@ def test_elevation_occupants_prefers_largest_on_overlap():
     assert nested == 0
     assert occupies_elevation(large)
     assert occupies_elevation(small)
+
+
+def test_elevation_blocks_keeps_a_chassis_as_one_span():
+    chassis = _dev(id=1, name="UCS chassis", device_type="chassis", ru_start=32, ru_end=38)
+    switch = _dev(id=2, name="leaf", device_type="switch", ru_start=20, ru_end=21)
+    blocks = elevation_blocks(elevation_occupants([chassis, switch]))
+    by_name = {dev.name: (top_u, span) for dev, top_u, span in blocks}
+    assert by_name["UCS chassis"] == (38, 7)
+    assert by_name["leaf"] == (21, 2)
+
+
+def test_elevation_blocks_split_when_a_larger_device_owns_the_middle():
+    large = _dev(id=2, name="chassis", device_type="chassis", ru_start=10, ru_end=20)
+    small = _dev(id=1, name="switch", device_type="switch", ru_start=18, ru_end=24)
+    blocks = elevation_blocks(elevation_occupants([small, large]))
+    switch_spans = [(top, span) for dev, top, span in blocks if dev.name == "switch"]
+    chassis_spans = [(top, span) for dev, top, span in blocks if dev.name == "chassis"]
+    assert chassis_spans == [(20, 11)]
+    assert switch_spans == [(24, 4)]
