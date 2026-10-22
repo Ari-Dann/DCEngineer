@@ -118,6 +118,8 @@ class Rack(Base):
     ru_height: Mapped[int] = mapped_column(Integer, default=42)
     width_inches: Mapped[float] = mapped_column(Float, default=19.0)
     notes: Mapped[str] = mapped_column(Text, default="")
+    external_id: Mapped[str] = mapped_column(String(128), default="", index=True)
+    source: Mapped[str] = mapped_column(String(64), default="", index=True)
     restricted: Mapped[bool] = mapped_column(Boolean, default=False)
     restriction_type: Mapped[str] = mapped_column(String(64), default="")  # government / EMSS / other
     photography_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -141,6 +143,8 @@ class Device(Base):
     vendor: Mapped[str] = mapped_column(String(128), default="", index=True)
     model: Mapped[str] = mapped_column(String(128), default="")
     serial: Mapped[str] = mapped_column(String(128), default="", index=True)
+    external_id: Mapped[str] = mapped_column(String(128), default="", index=True)
+    source: Mapped[str] = mapped_column(String(64), default="", index=True)
     asset_tag: Mapped[str] = mapped_column(String(128), default="")
     owner: Mapped[str] = mapped_column(String(255), default="", index=True)
     device_type: Mapped[str] = mapped_column(String(64), default="", index=True)
@@ -383,6 +387,27 @@ class AuditLog(Base):
     entity_type: Mapped[str] = mapped_column(String(64), default="")
     entity_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     detail: Mapped[str] = mapped_column(Text, default="")
+    api_key_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    http_method: Mapped[str] = mapped_column(String(16), default="")
+    http_path: Mapped[str] = mapped_column(String(512), default="")
+    http_status: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ApiKey(Base):
+    """Machine credential. The secret is stored only as a SHA-256 hash."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    prefix: Mapped[str] = mapped_column(String(32), index=True)
+    key_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    scopes: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

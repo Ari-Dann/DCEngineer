@@ -1,0 +1,43 @@
+# Optional MCP server for agents. It calls the DCEngineer API with one API key.
+# The key is created in Settings and pasted into DCE_API_KEY. It is not a model key.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.mcp.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d
+#
+# The port is bound to loopback. Point a local agent at http://127.0.0.1:8765/mcp
+# and send Authorization: Bearer $DCE_API_KEY. Do not publish this port on the
+# public proxy. For a desktop agent, stdio is simpler:
+#
+#   docker run -i --rm \
+#     -e DCE_API_URL=https://dce.example.com \
+#     -e DCE_API_KEY \
+#     ghcr.io/ari-dann/dcengineer-mcp:latest
+
+services:
+  mcp:
+    image: ${DCE_MCP_IMAGE:-ghcr.io/ari-dann/dcengineer-mcp:latest}
+    build:
+      context: ./mcp
+      dockerfile: Dockerfile
+    container_name: dcengineer-mcp
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+      DCE_API_URL: ${DCE_API_URL:-http://dcengineer:8080}
+      DCE_API_KEY: ${DCE_API_KEY:-}
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8765
+      MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-http://127.0.0.1:8765}
+      MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:-}
+    ports:
+      - "127.0.0.1:${DCE_MCP_PORT:-8765}:8765"
+    depends_on:
+      dcengineer:
+        condition: service_healthy
+    networks:
+      - dce-internal
+
+networks:
+  dce-internal:
+    name: dce-internal

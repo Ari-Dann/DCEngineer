@@ -1,8 +1,9 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Role, User, getSession, ops } from "../api";
+import { API_KEY_SCOPES, ApiKey, Role, User, getSession, ops } from "../api";
 import ThemeToggle from "../components/ThemeToggle";
 
 const empty = { username: "", email: "", password: "", full_name: "", role: "engineer" as Role, is_active: true };
+const defaultScopes = ["inventory:read", "ops:read"];
 
 export default function Settings() {
   const me = getSession();
@@ -12,10 +13,16 @@ export default function Settings() {
   const [form, setForm] = useState(empty);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [installHint, setInstallHint] = useState("");
+  const [keys, setKeys] = useState<ApiKey[]>([]);
+  const [keyName, setKeyName] = useState("");
+  const [keyScopes, setKeyScopes] = useState<string[]>(defaultScopes);
+  const [keyDays, setKeyDays] = useState("365");
+  const [freshToken, setFreshToken] = useState("");
 
   function loadUsers() {
     if (me?.role === "admin") {
       ops.users().then(setUsers).catch((e) => setError(String(e.message || e)));
+      ops.apiKeys().then(setKeys).catch((e) => setError(String(e.message || e)));
     }
   }
 
@@ -157,6 +164,100 @@ export default function Settings() {
                 </button>
               )}
             </div>
+          </form>
+          <form
+            className="card"
+            style={{ marginTop: 16 }}
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setError("");
+              setMsg("");
+              setFreshToken("");
+              try {
+                const days = keyDays.trim() ? Number(keyDays) : null;
+                if (days != null && (!Number.isInteger(days) || days < 1)) {
+                  setError("Expiry must be a whole number of days, or blank.");
+                  return;
+                }
+                const created = await ops.createApiKey({
+                  name: keyName,
+                  scopes: keyScopes,
+                  expires_in_days: days,
+                });
+                setFreshToken(created.token);
+                setKeyName("");
+                setKeys(await ops.apiKeys());
+                setMsg(`Created API key ${created.name}. Copy the token below. It is not shown again.`);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Could not create API key");
+              }
+            }}
+          >
+            <h3>API keys</h3>
+            <p className="muted">
+              Machine access for integrators and the MCP server. A key can read or write inventory and operations.
+              It cannot manage users, backups, imports, or photos.
+            </p>
+            {freshToken && (
+              <label className="field">
+                <span>Token (shown once)</span>
+                <input readOnly value={freshToken} onFocus={(e) => e.currentTarget.select()} />
+              </label>
+            )}
+            <div className="row">
+              <label className="field">
+                <span>Name</span>
+                <input value={keyName} onChange={(e) => setKeyName(e.target.value)} required placeholder="netbox-sync" />
+              </label>
+              <label className="field">
+                <span>Expires in days (blank for none)</span>
+                <input value={keyDays} onChange={(e) => setKeyDays(e.target.value)} inputMode="numeric" />
+              </label>
+            </div>
+            <div className="row">
+              {API_KEY_SCOPES.map((scope) => (
+                <label key={scope} className="field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={keyScopes.includes(scope)}
+                    onChange={(e) => {
+                      setKeyScopes((current) =>
+                        e.target.checked ? [...current, scope] : current.filter((item) => item !== scope),
+                      );
+                    }}
+                  />
+                  <span>{scope}</span>
+                </label>
+              ))}
+            </div>
+            <button className="btn primary" type="submit">
+              Create API key
+            </button>
+            {keys.map((key) => (
+              <div className="list-item" key={key.id}>
+                <div>
+                  {key.name}
+                  <div className="muted">
+                    {key.prefix}… · {key.scopes.join(", ") || "no scopes"}
+                    {key.revoked ? " · revoked" : ""}
+                    {key.expires_at ? ` · expires ${new Date(key.expires_at).toLocaleDateString()}` : ""}
+                  </div>
+                </div>
+                {!key.revoked && (
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={async () => {
+                      if (!window.confirm(`Revoke ${key.name}? Clients using it will stop working.`)) return;
+                      await ops.revokeApiKey(key.id);
+                      setKeys(await ops.apiKeys());
+                    }}
+                  >
+                    Revoke
+                  </button>
+                )}
+              </div>
+            ))}
           </form>
           <div className="card" style={{ marginTop: 16 }}>
             <h3>Users</h3>

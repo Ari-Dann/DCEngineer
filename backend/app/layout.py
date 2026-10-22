@@ -9,7 +9,7 @@ from app.models import AisleRow, Area, Device, Rack
 from app.nesting import descendants, nest_devices_in_racks
 from app.schemas import RelocateIn
 
-_SKIP_CLONE = {"id"}
+_SKIP_CLONE = {"id", "external_id", "source"}
 
 
 def unique_labels(values: list[str] | None) -> list[str]:

@@ -6,7 +6,7 @@ import logging
 from app.backup import run_backup
 from app.config import get_settings
 from app.database import get_db
-from app.deps import WriteUser, get_current_user
+from app.deps import ExportUser, WriteUser, get_current_user
 from app.media_paths import hierarchy_key, key_basename
 from app.models import (
     AppBackup,
@@ -104,7 +104,7 @@ def delete_attachment(attachment_id: int, db: Session = Depends(get_db), _: User
 
 
 @meta_router.get("/projects/{project_id}/export.xlsx")
-def export_rbi(project_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+def export_rbi(project_id: int, db: Session = Depends(get_db), _: User = Depends(ExportUser)):
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
@@ -118,7 +118,7 @@ def export_rbi(project_id: int, db: Session = Depends(get_db), _: User = Depends
 
 
 @meta_router.get("/projects/{project_id}/export-visio.zip")
-def export_visio_office(project_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+def export_visio_office(project_id: int, db: Session = Depends(get_db), _: User = Depends(ExportUser)):
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
@@ -137,7 +137,7 @@ def export_visio_office(project_id: int, db: Session = Depends(get_db), _: User 
 
 
 @meta_router.get("/projects/{project_id}/export-netbox.zip")
-def export_netbox(project_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+def export_netbox(project_id: int, db: Session = Depends(get_db), _: User = Depends(ExportUser)):
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
@@ -152,7 +152,7 @@ def export_netbox(project_id: int, db: Session = Depends(get_db), _: User = Depe
 
 
 @meta_router.get("/projects/{project_id}/racks/{rack_id}/elevation.svg")
-def export_rack_svg(project_id: int, rack_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+def export_rack_svg(project_id: int, rack_id: int, db: Session = Depends(get_db), _: User = Depends(ExportUser)):
     rack = db.get(Rack, rack_id)
     if not rack or rack.project_id != project_id:
         raise HTTPException(404, "Rack not found")
