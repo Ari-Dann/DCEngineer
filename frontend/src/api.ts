@@ -327,6 +327,10 @@ export const ops = {
     api<Capacity>("/api/capacity", { method: "POST", body: JSON.stringify(body) }),
   appBackups: () => api<AppBackup[]>("/api/app-backups"),
   triggerBackup: () => api<AppBackup>("/api/app-backups", { method: "POST" }),
+  apiKeys: () => api<ApiKey[]>("/api/api-keys"),
+  createApiKey: (body: { name: string; scopes: string[]; expires_in_days?: number | null }) =>
+    api<ApiKeyCreated>("/api/api-keys", { method: "POST", body: JSON.stringify(body) }),
+  revokeApiKey: (id: number) => api<{ ok: boolean }>(`/api/api-keys/${id}`, { method: "DELETE" }),
   users: () => api<User[]>("/api/users"),
   addUser: (body: { username: string; email: string; password: string; full_name?: string; role: Role }) =>
     api<User>("/api/users", { method: "POST", body: JSON.stringify(body) }),
@@ -1020,3 +1024,24 @@ export type User = {
   role: Role;
   is_active: boolean;
 };
+
+export const API_KEY_SCOPES = [
+  "inventory:read",
+  "inventory:write",
+  "ops:read",
+  "ops:write",
+  "export",
+] as const;
+
+export type ApiKey = {
+  id: number;
+  name: string;
+  prefix: string;
+  scopes: string[];
+  expires_at?: string | null;
+  revoked: boolean;
+  last_used_at?: string | null;
+  created_at: string;
+};
+
+export type ApiKeyCreated = ApiKey & { token: string };

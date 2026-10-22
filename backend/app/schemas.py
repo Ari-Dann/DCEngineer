@@ -34,6 +34,9 @@ class UserOut(ORMModel):
     role: str
     is_active: bool
     created_at: datetime
+    scopes: list[str] = []
+    api_key_id: Optional[int] = None
+    api_key_prefix: str = ""
 
 
 class UserCreate(BaseModel):
@@ -51,6 +54,67 @@ class UserUpdate(BaseModel):
     role: Optional[str] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
+
+
+class ApiKeyCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    scopes: list[str]
+    expires_in_days: Optional[int] = 365
+
+    @field_validator("expires_in_days")
+    @classmethod
+    def _expiry(cls, value: Optional[int]) -> Optional[int]:
+        if value is None:
+            return None
+        if value < 1 or value > 3650:
+            raise ValueError("expires_in_days must be between 1 and 3650, or null for no expiry")
+        return value
+
+
+class ApiKeyOut(ORMModel):
+    id: int
+    name: str
+    prefix: str
+    scopes: list[str] = []
+    created_by: Optional[int]
+    expires_at: Optional[datetime]
+    revoked: bool
+    last_used_at: Optional[datetime]
+    created_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def _scopes(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            scopes = value.get("scopes")
+            if isinstance(scopes, str):
+                value = dict(value)
+                value["scopes"] = [part for part in scopes.split() if part]
+            return value
+        scopes = getattr(value, "scopes", None)
+        if isinstance(scopes, str):
+            data = {column.name: getattr(value, column.name) for column in value.__table__.columns}
+            data["scopes"] = [part for part in scopes.split() if part]
+            return data
+        return value
+
+
+class ApiKeyCreated(ApiKeyOut):
+    token: str
+
+
+class AuditOut(ORMModel):
+    id: int
+    user_id: Optional[int]
+    api_key_id: Optional[int] = None
+    action: str
+    entity_type: str
+    entity_id: Optional[int]
+    detail: str
+    http_method: str = ""
+    http_path: str = ""
+    http_status: Optional[int] = None
+    created_at: datetime
 
 
 class RestrictionMixin(BaseModel):
@@ -172,6 +236,8 @@ class RackIn(RestrictionMixin):
     ru_height: int = Field(default=42, ge=1, le=70)
     width_inches: float = 19.0
     notes: str = ""
+    external_id: str = ""
+    source: str = ""
 
 
 class RackOut(RackIn, ORMModel):
@@ -186,6 +252,8 @@ class DeviceIn(BaseModel):
     vendor: str = ""
     model: str = ""
     serial: str = ""
+    external_id: str = ""
+    source: str = ""
     asset_tag: str = ""
     owner: str = ""
     device_type: str = ""
@@ -234,6 +302,8 @@ class DevicePatch(BaseModel):
     vendor: Optional[str] = None
     model: Optional[str] = None
     serial: Optional[str] = None
+    external_id: Optional[str] = None
+    source: Optional[str] = None
     asset_tag: Optional[str] = None
     owner: Optional[str] = None
     device_type: Optional[str] = None
@@ -281,6 +351,72 @@ class DeviceOut(DeviceIn, ORMModel):
     captured_by: Optional[int]
     captured_at: datetime
     eol_status: Optional[str] = None
+    capture_restricted: bool = False
+
+
+class DeviceUpsert(BaseModel):
+    match: Literal["auto", "serial", "external_id"] = "auto"
+    overwrite_empty: bool = False
+    name: Optional[str] = None
+    rack_id: Optional[int] = None
+    hostname: Optional[str] = None
+    vendor: Optional[str] = None
+    model: Optional[str] = None
+    serial: Optional[str] = None
+    external_id: Optional[str] = None
+    source: Optional[str] = None
+    asset_tag: Optional[str] = None
+    owner: Optional[str] = None
+    device_type: Optional[str] = None
+    function: Optional[str] = None
+    ru_start: Optional[int] = Field(default=None, ge=1, le=70)
+    ru_end: Optional[int] = Field(default=None, ge=1, le=70)
+    parent_device_id: Optional[int] = None
+    restricted: Optional[bool] = None
+    restricted_reason: Optional[str] = None
+    fan_orientation: Optional[str] = None
+    indicator_type: Optional[str] = None
+    indicator_color: Optional[str] = None
+    power_draw_watts: Optional[int] = None
+    power_draw_unit: Optional[Literal["W", "kW"]] = None
+    dc_power_draw_amps: Optional[float] = None
+    pdu_a_id: Optional[int] = None
+    pdu_b_id: Optional[int] = None
+    management_ip: Optional[str] = None
+    discovered_via: Optional[str] = None
+    undocumented: Optional[bool] = None
+    eol_date: Optional[str] = None
+    eos_date: Optional[str] = None
+    eol_notes: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class DeviceUpsertOut(BaseModel):
+    action: Literal["created", "updated"]
+    device: DeviceOut
+
+
+class RackUpsert(BaseModel):
+    match: Literal["auto", "external_id", "name"] = "auto"
+    overwrite_empty: bool = False
+    name: Optional[str] = None
+    area_id: Optional[int] = None
+    row_id: Optional[int] = None
+    row_label: Optional[str] = None
+    position: Optional[str] = None
+    ru_height: Optional[int] = Field(default=None, ge=1, le=70)
+    width_inches: Optional[float] = None
+    notes: Optional[str] = None
+    external_id: Optional[str] = None
+    source: Optional[str] = None
+    restricted: Optional[bool] = None
+    restriction_type: Optional[str] = None
+    photography_allowed: Optional[bool] = None
+
+
+class RackUpsertOut(BaseModel):
+    action: Literal["created", "updated"]
+    rack: RackOut
 
 
 class PDUIn(BaseModel):

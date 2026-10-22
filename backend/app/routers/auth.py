@@ -15,7 +15,8 @@ from app.auth import (
     verify_password,
 )
 from app.database import get_db
-from app.deps import AdminUser, get_current_user
+from app.access import Actor
+from app.deps import AdminUser, get_actor, get_current_user
 from app.models import AuditLog, User
 from app.schemas import LoginIn, RefreshIn, TokenPair, UserCreate, UserOut, UserUpdate
 
@@ -82,8 +83,24 @@ def logout(body: RefreshIn, user: User = Depends(get_current_user), db: Session 
 
 
 @router.get("/me", response_model=UserOut)
-def me(user: User = Depends(get_current_user)):
-    return user
+def me(actor: Actor = Depends(get_actor)):
+    if actor.kind == "user" and actor.user is not None:
+        out = UserOut.model_validate(actor.user)
+        out.scopes = sorted(actor.scopes)
+        return out
+    key = actor.api_key
+    return UserOut(
+        id=0,
+        username=actor.username,
+        email="",
+        full_name=key.name if key else "api-key",
+        role="integration",
+        is_active=True,
+        created_at=key.created_at if key else datetime.now(timezone.utc),
+        scopes=sorted(actor.scopes),
+        api_key_id=key.id if key else None,
+        api_key_prefix=key.prefix if key else "",
+    )
 
 
 @users_router.get("", response_model=list[UserOut])

@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_minutes: int = 480
     jwt_refresh_days: int = 14
+    api_key_rpm: int = 300
 
     bootstrap_admin_user: str = "admin"
     bootstrap_admin_password: str = "admin"

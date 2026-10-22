@@ -1,17 +1,18 @@
 # Optional vision sidecar. Talks only to the DCEngineer JWT API — never writes
 # final devices. Model API keys stay in this container.
 #
-# Lab:
+# Lab (build locally):
 #   docker compose -f docker-compose.dev.yml -f docker-compose.vision.yml up -d --build
-# Production (Caddy stack):
-#   docker compose -f docker-compose.yml -f docker-compose.vision.yml up -d --build
+# Production (pull the published sidecar image, no local build):
+#   docker compose -f docker-compose.yml -f docker-compose.vision.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.vision.yml up -d
 #
 # Providers: claude | gemini | huggingface | openai | ollama
 # Hugging Face short names: qwen-vl, qwen2-vl, llama-3.2-vision (gated).
 
 services:
   sidecar:
-    image: ${DCE_SIDECAR_IMAGE:-dcengineer-sidecar:local}
+    image: ${DCE_SIDECAR_IMAGE:-ghcr.io/ari-dann/dcengineer-sidecar:latest}
     build:
       context: ./sidecar
       dockerfile: Dockerfile

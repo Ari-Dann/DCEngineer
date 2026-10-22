@@ -33,6 +33,14 @@ Caddy, Traefik, or Nginx  →  dcengineer:8080
 
 One container serves the API and the built SPA. Traefik routing uses a **dynamic YAML file** (no container labels) so compose UIs stay clean.
 
+Optional images from this same repository (no extra GitHub repo):
+
+| Image | Role |
+| --- | --- |
+| `ghcr.io/ari-dann/dcengineer:latest` | API + PWA |
+| `ghcr.io/ari-dann/dcengineer-sidecar:latest` | Vision worker |
+| `ghcr.io/ari-dann/dcengineer-mcp:latest` | MCP server for agents |
+
 ---
 
 ## Image (`:latest`)
@@ -43,7 +51,7 @@ Every push to `main` publishes:
 ghcr.io/ari-dann/dcengineer:latest
 ```
 
-plus a short SHA tag. Pull it instead of building when you only want to run the app:
+plus a short SHA tag. The same workflow publishes `ghcr.io/ari-dann/dcengineer-sidecar` and `ghcr.io/ari-dann/dcengineer-mcp`. Each package has to be **public** once (GitHub → Packages → package settings → Change visibility) so unauthenticated `docker pull` works. Pull the app instead of building when you only want to run it:
 
 ```bash
 docker pull ghcr.io/ari-dann/dcengineer:latest
@@ -55,9 +63,7 @@ Override the image in `.env`:
 DCE_IMAGE=ghcr.io/ari-dann/dcengineer:latest
 ```
 
-Forks and template copies should change `DCE_IMAGE` to their own GHCR repo, or keep building locally with `docker-compose.dev.yml`.
-
-The GHCR package must be **public** (GitHub → Packages → `dcengineer` → Package settings → Change visibility) so unauthenticated `docker pull` works.
+Forks and template copies should change `DCE_IMAGE`, `DCE_SIDECAR_IMAGE`, and `DCE_MCP_IMAGE` to their own GHCR repo, or keep building locally with `docker-compose.dev.yml`.
 
 ---
 
@@ -215,6 +221,50 @@ ENV used by those files: `DCE_IMAGE`, `DCE_HOSTNAME`, `TRAEFIK_NETWORK`, `TRAEFI
 
 Bootstrap admin is created **only when the user table is empty** (`BOOTSTRAP_ADMIN_*`). Additional users: Settings → (admin) or `POST /api/users`. Set `BOOTSTRAP_SIDECAR_USER` and `BOOTSTRAP_SIDECAR_PASSWORD` to create a `sidecar` worker account that can pull attachments and write **staging proposals only** — it cannot create devices.
 
+### API keys (integrators and agents)
+
+Settings → **API keys** (admin). The token is shown once and stored only as a hash. Send it as `Authorization: Bearer dce_live_…` on the same routes the UI uses. Keys are not user accounts and cannot sign in to the PWA.
+
+| Scope | Allows |
+| --- | --- |
+| `inventory:read` | Projects, layout, devices, search, PDUs, cables, handoffs |
+| `inventory:write` | Create and update those records, including upsert. No deletes, imports, or photos |
+| `ops:read` / `ops:write` | Inspections, incidents, work orders, backup catalogue, DR drills, capacity |
+| `export` | RBI workbook, Visio/Office zip, NetBox zip, rack SVG |
+
+Default expiry is 365 days. Pass `expires_in_days: null` for no expiry. Revoke from Settings or `DELETE /api/api-keys/{id}`. Calls are written to `GET /api/audit` (admin) and limited to `API_KEY_RPM` (default 300/minute).
+
+List routes accept `limit` (1–500) and `offset`. The response stays a JSON array. `X-Total-Count`, `X-Limit`, and `X-Offset` say where you are.
+
+Idempotent writes:
+
+- `POST /api/projects/{id}/devices/upsert` matches `external_id` + `source`, otherwise `serial`. Empty strings do not blank existing values. A device that already sits in another rack is left there (`409`).
+- `POST /api/projects/{id}/racks/upsert` matches `external_id` + `source`, otherwise a unique rack name.
+
+`capture_restricted` is true when the device or its rack, row, area, or project is restricted or forbids photography. API keys still receive the full record. The MCP server strips serial, asset tag, management IP, and notes in that case. API keys cannot download attachment bytes.
+
+OpenAPI: `https://${DCE_HOSTNAME}/docs`.
+
+### MCP
+
+The MCP server is a client of this API. Create a key, then either run it over stdio or on loopback:
+
+```bash
+# stdio, for Cursor / Claude Desktop
+docker run -i --rm \
+  -e DCE_API_URL=https://dce.example.com \
+  -e DCE_API_KEY=dce_live_… \
+  ghcr.io/ari-dann/dcengineer-mcp:latest
+```
+
+```bash
+# HTTP on 127.0.0.1:8765 — not on the public proxy
+docker compose -f docker-compose.yml -f docker-compose.mcp.yml pull
+docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d
+```
+
+Tools: `list_projects`, `search`, `get_device`, `rack_elevation`, `list_open_work`, `upsert_device`, `add_handoff_note`. HTTP clients must send the same API key as `Authorization: Bearer`. The server does not accept photos.
+
 ---
 
 ## Browser, tablet, GrapheneOS
@@ -270,6 +320,15 @@ Set `BOOTSTRAP_SIDECAR_PASSWORD` / `DCE_SIDECAR_PASSWORD` and a provider key in 
 | `openai` | `OPENAI_API_KEY` | `gpt-4o`, or any OpenAI-compatible server via `VISION_BASE_URL` |
 | `claude` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` |
 
+Pull the sidecar instead of building it:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.vision.yml pull
+docker compose -f docker-compose.yml -f docker-compose.vision.yml up -d
+```
+
+`DCE_SIDECAR_IMAGE` defaults to `ghcr.io/ari-dann/dcengineer-sidecar:latest`. `--build` still builds `./sidecar` when you are changing the worker.
+
 ```bash
 # Gemini
 VISION_PROVIDER=gemini GEMINI_API_KEY=... VISION_MODEL=gemini-2.0-flash
@@ -314,6 +373,9 @@ cd backend && pip install -r requirements.txt && pytest -q
 # Sidecar unit tests (mocked; no live model calls)
 cd sidecar && pip install -r requirements.txt && pytest -q
 
+# MCP server (redaction and tool payloads; no live API)
+cd mcp && pip install -r requirements-dev.txt && pytest -q
+
 # UI (proxies /api to :8080)
 cd frontend && npm install && npm run build
 # npm run dev
@@ -328,7 +390,8 @@ CI runs pytest and `npm run build` on every push. The image workflow publishes `
 ```
 backend/app/          FastAPI + SQLAlchemy + JWTAuth
 frontend/             React + Vite PWA
-sidecar/              Optional vision worker (JWT API + Claude)
+sidecar/              Optional vision worker (JWT API + model provider)
+mcp/                  MCP server for agents (stdio or loopback HTTP)
 deploy/traefik|nginx|caddy
 docker-compose*.yml
 .env.example

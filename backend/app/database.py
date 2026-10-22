@@ -98,6 +98,32 @@ def _ensure_columns() -> None:
                 conn.execute(text("ALTER TABLE devices ADD COLUMN owner VARCHAR(255) DEFAULT ''"))
             if "parent_device_id" not in dcols:
                 conn.execute(text("ALTER TABLE devices ADD COLUMN parent_device_id INTEGER"))
+            if "external_id" not in dcols:
+                conn.execute(text("ALTER TABLE devices ADD COLUMN external_id VARCHAR(128) DEFAULT ''"))
+            if "source" not in dcols:
+                conn.execute(text("ALTER TABLE devices ADD COLUMN source VARCHAR(64) DEFAULT ''"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_devices_external_id ON devices (external_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_devices_source ON devices (source)"))
+    if "racks" in tables:
+        rcols = {c["name"] for c in inspector.get_columns("racks")}
+        with engine.begin() as conn:
+            if "external_id" not in rcols:
+                conn.execute(text("ALTER TABLE racks ADD COLUMN external_id VARCHAR(128) DEFAULT ''"))
+            if "source" not in rcols:
+                conn.execute(text("ALTER TABLE racks ADD COLUMN source VARCHAR(64) DEFAULT ''"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_racks_external_id ON racks (external_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_racks_source ON racks (source)"))
+    if "audit_logs" in tables:
+        acols = {c["name"] for c in inspector.get_columns("audit_logs")}
+        with engine.begin() as conn:
+            if "api_key_id" not in acols:
+                conn.execute(text("ALTER TABLE audit_logs ADD COLUMN api_key_id INTEGER"))
+            if "http_method" not in acols:
+                conn.execute(text("ALTER TABLE audit_logs ADD COLUMN http_method VARCHAR(16) DEFAULT ''"))
+            if "http_path" not in acols:
+                conn.execute(text("ALTER TABLE audit_logs ADD COLUMN http_path VARCHAR(512) DEFAULT ''"))
+            if "http_status" not in acols:
+                conn.execute(text("ALTER TABLE audit_logs ADD COLUMN http_status INTEGER"))
     if "vision_sessions" in tables:
         scols = {c["name"] for c in inspector.get_columns("vision_sessions")}
         if "layout_review_json" not in scols:

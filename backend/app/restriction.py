@@ -96,6 +96,33 @@ def resolve_session_location(
     return project, area, row, rack
 
 
+def _blocked(entity: Any | None) -> bool:
+    if entity is None:
+        return False
+    if getattr(entity, "restricted", False):
+        return True
+    return getattr(entity, "photography_allowed", True) is False
+
+
+def capture_restricted(db: Session, device: Device) -> bool:
+    """True when this device or an ancestor forbids photography or is restricted.
+
+    Used so machine clients can tell a model to drop serials and addresses
+    without walking the hierarchy themselves.
+    """
+    if device.restricted:
+        return True
+    rack = db.get(Rack, device.rack_id) if device.rack_id else None
+    row = db.get(AisleRow, rack.row_id) if rack and rack.row_id else None
+    area = None
+    if rack and rack.area_id:
+        area = db.get(Area, rack.area_id)
+    elif row and row.area_id:
+        area = db.get(Area, row.area_id)
+    project = db.get(Project, device.project_id)
+    return any(_blocked(entity) for entity in (rack, row, area, project))
+
+
 def hierarchy_reasons(db: Session, session: VisionSession) -> list[str]:
     project, area, row, rack = resolve_session_location(db, session)
     reasons: list[str] = []

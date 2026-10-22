@@ -11,9 +11,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.audit_mw import ApiKeyAuditMiddleware
 from app.backup import backup_loop
 from app.config import get_settings
 from app.database import SessionLocal, init_db
+from app.routers.apikeys import audit_router, router as api_keys_router
 from app.routers.auth import router as auth_router
 from app.routers.auth import users_router
 from app.routers.files import files_router, meta_router
@@ -63,7 +65,7 @@ settings = get_settings()
 app = FastAPI(
     title="DCEngineer",
     version="1.0.0",
-    description="Datacenter engineer assistant — RBI capture, ops, JWTAuth.",
+    description="Datacenter engineer assistant — RBI capture, ops, JWTAuth, and scoped API keys.",
     lifespan=lifespan,
 )
 
@@ -78,6 +80,7 @@ class NoStoreAPIMiddleware(BaseHTTPMiddleware):
         return response
 
 
+app.add_middleware(ApiKeyAuditMiddleware)
 app.add_middleware(NoStoreAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -85,10 +88,13 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Total-Count", "X-Limit", "X-Offset"],
 )
 
 app.include_router(auth_router)
 app.include_router(users_router)
+app.include_router(api_keys_router)
+app.include_router(audit_router)
 app.include_router(projects_router)
 app.include_router(ops_router)
 app.include_router(files_router)
